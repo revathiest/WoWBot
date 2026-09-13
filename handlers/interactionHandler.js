@@ -99,7 +99,17 @@ async function handleInteraction(interaction) {
   const command = interaction.client.commands?.get(interaction.commandName);
 
   if (!command) {
-    console.warn(`⚠️  Received an unknown command: ${interaction.commandName}`);
+    // Reaching here while the command IS registered with Discord means this
+    // process is running older code than whatever registered it — most often a
+    // second instance sharing the token. Both copies receive every interaction,
+    // and whichever answers first consumes the token, leaving the other to fail
+    // with 10062. Say so, because the bare message sends people hunting in the
+    // wrong place.
+    console.warn(
+      `⚠️  Received an unknown command: /${interaction.commandName}. ` +
+        'This process does not have that command. If it exists in your source, ' +
+        'another instance running older code is sharing this bot token.'
+    );
     await respondWithError(interaction, '❌ That command is no longer available.');
     return;
   }

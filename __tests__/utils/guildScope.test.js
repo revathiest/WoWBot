@@ -21,13 +21,13 @@ describe('guildScopeWarnings', () => {
     expect(guildScopeWarnings([guild('g1', 'Home'), guild('g2', 'Other')], null)).toEqual([]);
   });
 
-  it('warns about extra guilds, because GUILD_ID does not scope them', () => {
+  it('names the guilds a pinned instance is ignoring', () => {
     const warnings = guildScopeWarnings([guild('g1', 'Home'), guild('g2', 'Other')], 'g1').join(' ');
 
     expect(warnings).toContain('1 other guild(s)');
     expect(warnings).toContain('Other [g2]');
-    expect(warnings).toContain('does NOT stop this process');
-    expect(warnings).toContain('separate Discord application');
+    // Those guilds get no response unless another instance covers them.
+    expect(warnings).toContain('Another instance must serve those');
   });
 
   it('warns when the configured guild has not been joined', () => {
@@ -38,5 +38,24 @@ describe('guildScopeWarnings', () => {
 
   it('handles a bot in no guilds at all', () => {
     expect(guildScopeWarnings([], 'g1')).toEqual([]);
+  });
+});
+
+describe('isGuildInScope', () => {
+  const { isGuildInScope } = require('../../utils/guildScope');
+
+  it('serves every guild when none is configured', () => {
+    expect(isGuildInScope('anything', null)).toBe(true);
+    expect(isGuildInScope('other', '')).toBe(true);
+  });
+
+  it('serves only the configured guild when one is set', () => {
+    expect(isGuildInScope('g1', 'g1')).toBe(true);
+    expect(isGuildInScope('g2', 'g1')).toBe(false);
+  });
+
+  it('never treats a DM as in scope', () => {
+    expect(isGuildInScope(null, null)).toBe(false);
+    expect(isGuildInScope(undefined, 'g1')).toBe(false);
   });
 });

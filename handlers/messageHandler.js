@@ -8,6 +8,8 @@ const state = require('../utils/spam/state');
 const enforcement = require('../utils/spam/enforcement');
 const { buildAlertEmbed, sendAlert } = require('../utils/spam/alert');
 const { loadConfig } = require('../utils/spam/config');
+const { isGuildInScope } = require('../utils/guildScope');
+const { readConfig } = require('../config');
 
 /**
  * Reasons to ignore a message outright, cheapest first.
@@ -15,6 +17,13 @@ const { loadConfig } = require('../utils/spam/config');
  */
 function exemptionFor(message, config) {
   if (!message.guild) return 'not a guild message';
+
+  // Same scoping as interactions: a dedicated instance moderates only its guild,
+  // so two deployments never both act on the same message.
+  if (!isGuildInScope(message.guild.id, readConfig().discord.guildId)) {
+    return 'outside the guild this instance serves';
+  }
+
   if (message.author?.bot) return 'author is a bot';
   if (!config.enabled) return 'spam detection disabled';
 

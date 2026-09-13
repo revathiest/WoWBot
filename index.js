@@ -5,7 +5,7 @@ require('dotenv/config');
 
 const { Client, Events, GatewayIntentBits, Partials } = require('discord.js');
 const { readConfig, validateConfig } = require('./config');
-const { registerCommands } = require('./utils/commandRegistration');
+const { registerCommands, registerGuildJoinHandler } = require('./utils/commandRegistration');
 const { registerInteractionHandler } = require('./handlers/interactionHandler');
 const { registerMessageHandler } = require('./handlers/messageHandler');
 const { loadConfig: loadSpamConfig } = require('./utils/spam/config');
@@ -43,6 +43,9 @@ const client = new Client({
 
 registerInteractionHandler(client, Events);
 registerMessageHandler(client, Events);
+// A guild that invites the bot gets its commands immediately, rather than at the
+// next restart.
+registerGuildJoinHandler(client, Events);
 
 client.once(Events.ClientReady, async readyClient => {
   console.log(`🟢 Logged in as ${readyClient.user.tag}`);

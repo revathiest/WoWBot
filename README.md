@@ -79,7 +79,7 @@ cp .env.example .env
 | --- | --- | --- |
 | `DISCORD_TOKEN` | yes | Bot token. |
 | `APPLICATION_ID` | yes | Discord application (client) ID. |
-| `GUILD_ID` | no | When set, slash commands **register** to this guild only and appear instantly, and any global commands are removed so nothing appears twice. Leave blank to register globally, which can take up to an hour to propagate. **This does not scope which guilds the bot serves** — see the warning below. |
+| `GUILD_ID` | no | **Rarely needed.** Leave blank and the bot serves every guild it joins, registering commands per-guild on the way in. Set it only to pin one instance to a single guild, in which case it ignores every other guild entirely. |
 | `BLIZZARD_CLIENT_ID` | yes | Battle.net API client ID. |
 | `BLIZZARD_CLIENT_SECRET` | yes | Battle.net API client secret. |
 | `BLIZZARD_REGION` | no | Default region: `us`, `eu`, `kr`, or `tw`. Defaults to `us`. |
@@ -151,15 +151,11 @@ Throw from `execute` and the interaction handler will translate it into a sensib
 
 ## API behaviour worth knowing
 
-- **Command scope.** Guild-scoped and global commands stack in Discord's UI, so a command registered both ways is listed twice. When `GUILD_ID` is set, the bot registers to that guild and then clears the global set. The wipe runs only after the guild registration succeeds, so a failure there cannot leave the application with no commands.
+- **Commands register per guild, never globally.** Guild commands appear instantly; global registration can take up to an hour to propagate, which makes a new command feel broken. On startup the bot registers to every guild it is in, and it registers to any guild that invites it the moment it joins — no restart needed. Leftover global commands are cleared so nothing shows up twice.
 
-  > ⚠️ Because of this, do not point a development instance at the same `APPLICATION_ID` as a production instance that registers globally — starting the dev bot will remove production's commands. Use a separate Discord application for development.
+- **`GUILD_ID` pins an instance to one guild.** Leave it blank for normal use. Set it and the instance registers only there and **ignores interactions and messages from every other guild**, which is how two deployments can share one bot token without fighting.
 
-- **`GUILD_ID` does not isolate an instance.** It controls where commands are *registered*, nothing more. A logged-in token receives interactions and messages from **every guild the bot has been invited to**, whatever `GUILD_ID` says.
-
-  > ⚠️ **Never run two instances on one bot token.** Both receive every interaction and race to answer it. The loser gets `DiscordAPIError[10062] Unknown interaction` — which looks like a timeout but is not — and users see whichever copy won, including "command no longer available" from a stale deployment that lacks a newer command. Giving the second instance a different `GUILD_ID` does **not** prevent this. Use a **separate Discord application** (separate token) per environment.
-
-  The bot prints the guilds it is serving at startup and warns when it is in any beyond `GUILD_ID`, so this is visible immediately rather than after an afternoon of debugging.
+  > ⚠️ Without a `GUILD_ID`, running two instances on one token means both receive every interaction and race to answer it. The loser gets `DiscordAPIError[10062] Unknown interaction` — which looks like a timeout but is not. Either pin each instance to its own guild, or give each environment a separate Discord application.
 
 - **`node --watch` does not pick up new command files.** It watches the module graph, and commands are loaded dynamically at ready-time, so a **brand-new** file in `commands/` never triggers a restart. Restart `npm run dev` manually after adding a command, or the running process will keep answering "that command is no longer available".
 

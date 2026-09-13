@@ -62,14 +62,35 @@ async function clearGlobalCommands(rest, applicationId) {
   return existing.length;
 }
 
+/** Pushes the command set to one guild. Returns true on success. */
+async function putGuildCommands({ rest, applicationId, guildId, definitions, label }) {
+  try {
+    await rest.put(Routes.applicationGuildCommands(applicationId, guildId), { body: definitions });
+    console.log(`✅ Registered ${definitions.length} command(s) to ${label}`);
+    return true;
+  } catch (err) {
+    console.error(`❌ Failed to register commands to ${label}: ${err.message}`);
+    return false;
+  }
+}
+
+/** The command definitions, built once and reused across guilds. */
+function buildDefinitions(commandMap) {
+  return [...commandMap.values()].map(command => command.data.toJSON());
+}
+
 /**
- * Loads commands onto `client.commands` and pushes their definitions to Discord.
- * Registers to a single guild when GUILD_ID is set (updates are instant, which is
- * what you want in development) and globally otherwise.
+ * Registers the command set to every guild the bot is in, or to GUILD_ID alone
+ * when one is configured.
  *
- * When registering to a guild, any leftover global commands are cleared so they
- * do not appear twice. That only happens after the guild registration succeeds,
- * so a failure there cannot leave the application with no commands at all.
+ * Guild commands are used rather than global ones because they appear instantly;
+ * global registration can take up to an hour to propagate, which makes adding a
+ * command feel broken. The cost is one API call per guild, which is negligible
+ * at this scale.
+ *
+ * GUILD_ID is optional and rarely needed: leave it blank and the bot serves every
+ * guild it joins, registering on the way in. Set it only to pin an instance to a
+ * single guild.
  */
 async function registerCommands(client, options = {}) {
   const config = options.config ?? readConfig();
@@ -77,7 +98,7 @@ async function registerCommands(client, options = {}) {
 
   client.commands = commandMap;
 
-  const definitions = [...commandMap.values()].map(command => command.data.toJSON());
+  const definitions = buildDefinitions(commandMap);
   const names = definitions.map(definition => definition.name).join(', ') || 'none';
 
   const { applicationId, guildId, token } = config.discord;
@@ -89,24 +110,39 @@ async function registerCommands(client, options = {}) {
 
   const rest = options.rest ?? new REST({ version: '10' }).setToken(token);
 
-  const route = guildId
-    ? Routes.applicationGuildCommands(applicationId, guildId)
-    : Routes.applicationCommands(applicationId);
+  // Pinned to one guild, or every guild this bot has joined.
+  const targets = guildId
+    ? [{ id: guildId, name: `guild ${guildId}` }]
+    : [...(client.guilds?.cache?.values() ?? [])].map(guild => ({
+        id: guild.id,
+        name: `${guild.name} [${guild.id}]`
+      }));
 
-  const scope = guildId ? `guild ${guildId}` : 'globally';
-
-  try {
-    await rest.put(route, { body: definitions });
-    console.log(`✅ Registered ${definitions.length} command(s) ${scope}: ${names}`);
-  } catch (err) {
-    console.error(`❌ Failed to register slash commands ${scope}:`, err);
+  if (targets.length === 0) {
+    console.warn('⚠️  The bot is not in any guild, so there is nowhere to register commands.');
     return commandMap;
   }
 
-  if (guildId) {
+  console.log(`   Commands: ${names}`);
+
+  let registered = 0;
+  for (const target of targets) {
+    const ok = await putGuildCommands({
+      rest,
+      applicationId,
+      guildId: target.id,
+      definitions,
+      label: target.name
+    });
+    if (ok) registered += 1;
+  }
+
+  // Global commands would stack on top of the guild ones and show up twice. Only
+  // clear them once at least one guild registration succeeded, so a total failure
+  // cannot leave the application with no commands anywhere.
+  if (registered > 0) {
     try {
       const removed = await clearGlobalCommands(rest, applicationId);
-
       if (removed > 0) {
         console.log(`🧹 Removed ${removed} global command(s) to avoid duplicates.`);
       }
@@ -118,9 +154,52 @@ async function registerCommands(client, options = {}) {
   return commandMap;
 }
 
+/**
+ * Registers commands to a guild the bot has just joined, so the commands are
+ * usable immediately rather than after the next restart.
+ */
+async function registerCommandsForGuild(client, guild, options = {}) {
+  const config = options.config ?? readConfig();
+  const { applicationId, guildId, token } = config.discord;
+
+  if (!applicationId) return false;
+
+  // A pinned instance ignores guilds it does not serve.
+  if (guildId && guild.id !== guildId) {
+    console.log(`↪️  Joined ${guild.name} [${guild.id}], but this instance is pinned elsewhere.`);
+    return false;
+  }
+
+  const commandMap = client.commands ?? loadCommandsRecursively();
+  const rest = options.rest ?? new REST({ version: '10' }).setToken(token);
+
+  console.log(`👋 Joined ${guild.name} [${guild.id}] — registering commands.`);
+
+  return putGuildCommands({
+    rest,
+    applicationId,
+    guildId: guild.id,
+    definitions: buildDefinitions(commandMap),
+    label: `${guild.name} [${guild.id}]`
+  });
+}
+
+/** Wires automatic registration when the bot is added to a guild. */
+function registerGuildJoinHandler(client, Events, options = {}) {
+  client.on(Events.GuildCreate, guild => {
+    registerCommandsForGuild(client, guild, options).catch(err =>
+      console.error(`❌ Error registering commands for a new guild: ${err.message}`)
+    );
+  });
+}
+
 module.exports = {
   COMMANDS_DIR,
+  buildDefinitions,
   clearGlobalCommands,
   loadCommandsRecursively,
-  registerCommands
+  putGuildCommands,
+  registerCommands,
+  registerCommandsForGuild,
+  registerGuildJoinHandler
 };

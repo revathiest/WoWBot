@@ -3,6 +3,8 @@
 
 const { MessageFlags } = require('discord.js');
 const { BlizzardApiError } = require('../utils/blizzard/client');
+const { isGuildInScope } = require('../utils/guildScope');
+const { readConfig } = require('../config');
 
 /**
  * Turns an error into something worth showing a Discord user. Blizzard's own
@@ -108,6 +110,16 @@ async function respondWithError(interaction, content) {
 
 async function handleInteraction(interaction) {
   if (!interaction.isChatInputCommand?.()) return;
+
+  // GUILD_ID is optional. Left blank (the normal case) this instance serves every
+  // guild it has joined. Set, it pins the instance to one guild and ignores the
+  // rest, which is how two deployments can share a token without racing.
+  if (!isGuildInScope(interaction.guildId, readConfig().discord.guildId)) {
+    console.log(
+      `↪️  Ignoring /${interaction.commandName} from guild ${interaction.guildId ?? 'DM'} — outside this instance's scope.`
+    );
+    return;
+  }
 
   const command = interaction.client.commands?.get(interaction.commandName);
 

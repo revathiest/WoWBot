@@ -13,6 +13,9 @@ function createInteraction({
 
   return {
     commandName,
+    // Handlers scope work to the guild this instance serves, so a fake
+    // interaction needs one or it is ignored as out of scope.
+    guildId: 'test-guild',
     client: { commands },
     memberPermissions: { has: () => permissions },
     options: {

@@ -34,7 +34,8 @@ Keep these boundaries — the tests rely on them for mocking:
 
 ## Discord gotchas
 
-- **`GUILD_ID` scopes command registration only.** It does not scope which guilds the process serves — a token receives events from every guild the bot has joined. Two instances on one token race for every interaction; the loser sees `10062 Unknown interaction`, which reads like a timeout and is not. Separate environments need separate Discord applications, not a different `GUILD_ID`.
+- **Commands are always guild-scoped, never global.** `registerCommands` publishes to every guild in the cache, and `registerGuildJoinHandler` covers guilds joined later. Global commands are cleared after at least one guild succeeds. Do not "simplify" this back to a global `put` — global propagation takes up to an hour.
+- **`GUILD_ID` pins an instance.** Blank means serve every guild. Set means register only there and drop events from anywhere else, via `isGuildInScope` in `utils/guildScope.js`, checked at the top of both handlers. This is what lets two deployments share a token; before it existed they raced and the loser got a baffling `10062`.
 - **`10062` on a young interaction means a duplicate instance, not slowness.** If the interaction is well inside the 3000ms budget, this process answered in time and something else consumed the token first. `describeDeadInteraction` in `handlers/interactionHandler.js` encodes this; do not "simplify" it back to a plain timeout message.
 - **`node --watch` ignores brand-new files.** Commands are required dynamically at ready-time, so adding a file under `commands/` does not restart a `npm run dev` session. The loader's "just drop a file in" convenience does not hold in watch mode.
 

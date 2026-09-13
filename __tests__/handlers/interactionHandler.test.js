@@ -240,3 +240,57 @@ describe('registerInteractionHandler', () => {
     expect(client.on).toHaveBeenCalledWith('interactionCreate', handleInteraction);
   });
 });
+
+describe('guild scoping', () => {
+  // Two deployments sharing a token stop racing once each ignores the other's
+  // guild. This is the mechanism that makes that work.
+  const originalGuildId = process.env.GUILD_ID;
+
+  afterEach(() => {
+    if (originalGuildId === undefined) delete process.env.GUILD_ID;
+    else process.env.GUILD_ID = originalGuildId;
+  });
+
+  it('ignores an interaction from a guild this instance does not serve', async () => {
+    process.env.GUILD_ID = 'mine';
+    const execute = jest.fn();
+    const interaction = createInteraction({
+      commandName: 'token',
+      commands: new Map([['token', { execute }]])
+    });
+    interaction.guildId = 'theirs';
+
+    await handleInteraction(interaction);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(interaction.reply).not.toHaveBeenCalled();
+  });
+
+  it('serves its own guild', async () => {
+    process.env.GUILD_ID = 'mine';
+    const execute = jest.fn(async () => {});
+    const interaction = createInteraction({
+      commandName: 'token',
+      commands: new Map([['token', { execute }]])
+    });
+    interaction.guildId = 'mine';
+
+    await handleInteraction(interaction);
+
+    expect(execute).toHaveBeenCalled();
+  });
+
+  it('ignores DMs', async () => {
+    delete process.env.GUILD_ID;
+    const execute = jest.fn();
+    const interaction = createInteraction({
+      commandName: 'token',
+      commands: new Map([['token', { execute }]])
+    });
+    interaction.guildId = null;
+
+    await handleInteraction(interaction);
+
+    expect(execute).not.toHaveBeenCalled();
+  });
+});

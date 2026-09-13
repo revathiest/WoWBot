@@ -5,8 +5,8 @@ Conventions for anyone — human or agent — working in this repository.
 ## Shape of the project
 
 - **CommonJS, not ESM.** `require` / `module.exports` throughout. Do not add `"type": "module"`.
-- **No database.** The bot is stateless; everything comes from the Blizzard API per request.
-- **No privileged intents.** Only `GatewayIntentBits.Guilds`. If a feature seems to need message content or presence, rethink it first.
+- **No database.** Everything from the Blizzard API is fetched per request. The single exception is `data/spam.json`, which holds moderation settings so `/spam configure` survives a restart. Do not add a second store without a very good reason, and never put user data in it.
+- **Privileged intents: `MessageContent` and `GuildMembers` are enabled, for spam detection only.** They must be switched on in the Discord Developer Portal or login fails. Do not add further privileged intents, and do not use these two for anything beyond moderation.
 - **Native `fetch`.** Node 20+ provides it. Do not add axios, node-fetch, or a request library.
 
 ## Layering
@@ -20,6 +20,7 @@ Keep these boundaries — the tests rely on them for mocking:
 | `utils/blizzard/profile.js`, `gameData.js` | Thin endpoint wrappers. One function per endpoint, no formatting. |
 | `commands/` | Build embeds and reply. No `fetch`, no token handling. |
 | `handlers/` | Routing and error translation only. |
+| `utils/spam/` | `detector.js`, `state.js` and `patterns.js` must stay free of discord.js — that is what makes them testable with plain object literals. Only `enforcement.js` and `alert.js` touch Discord types. |
 
 ## Commands
 
@@ -44,6 +45,14 @@ Keep these boundaries — the tests rely on them for mocking:
 - Realm status and population live on the **connected realm**, not the realm document.
 - Mythic+ ratings are RGB component objects, not integers; `ratingColor()` packs them.
 - Currency values are in copper. `formatGold()` converts.
+
+## Spam detection
+
+- Detection is **signal counting, not scoring**: each check contributes one human-readable string, and the count is compared against a trust-tier requirement. Resist adding weights.
+- Trust tiers come from account age and server tenure only. There is no strike counter and no offender history — that is deliberate, since persisting punishment records would mean a real database.
+- Sliding-window state is in memory and self-sweeping. Anything added there must expire, or the maps grow forever.
+- **Never act without `enforcement.preflight()`.** It checks bot permissions, the server owner, and role hierarchy. A blocked action still raises an alert; silent failure is the worst outcome.
+- New scam patterns need a negative test proving ordinary guild chat does not match. `/spam test` exists for tuning them safely.
 
 ## Testing
 

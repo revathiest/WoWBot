@@ -31,6 +31,7 @@ describe('loadCommandsRecursively', () => {
       'mythicplus',
       'realm',
       'realms',
+      'spam',
       'token'
     ]);
   });

@@ -1,12 +1,28 @@
 // __tests__/helpers/interaction.js
 // A minimal stand-in for a discord.js ChatInputCommandInteraction.
 
-function createInteraction({ options = {}, commandName = 'test', commands } = {}) {
+function createInteraction({
+  options = {},
+  commandName = 'test',
+  commands,
+  subcommand = null,
+  subcommandGroup = null,
+  permissions = true
+} = {}) {
+  const read = name => (name in options ? options[name] : null);
+
   return {
     commandName,
     client: { commands },
+    memberPermissions: { has: () => permissions },
     options: {
-      getString: name => (name in options ? options[name] : null)
+      getString: read,
+      getInteger: read,
+      getBoolean: read,
+      getChannel: read,
+      getRole: read,
+      getSubcommand: () => subcommand,
+      getSubcommandGroup: () => subcommandGroup
     },
     deferred: false,
     replied: false,

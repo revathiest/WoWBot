@@ -2,7 +2,10 @@
 
 A Discord bot that pulls World of Warcraft data from the **Blizzard Battle.net API** and returns it as slash commands. Character profiles, Mythic+ ratings, realm status, item lookups, and the WoW Token price.
 
-Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no database and no privileged gateway intents.
+It also includes spam detection with automatic banning, modelled on trust tiers rather than a single
+threshold.
+
+Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no database.
 
 ---
 
@@ -16,6 +19,7 @@ Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no databas
 | `/item <query> [region]` | Item lookup by **exact name** or item ID: quality, item level, type, slot, required level, sell price, and icon. |
 | `/realms [search] [game] [region]` | Lists every playable realm, or searches them. Shows exact slugs when searching. |
 | `/token [region]` | Current WoW Token price in gold. |
+| `/spam status \| test \| configure …` | Inspect, dry-run, and tune spam detection. Requires Manage Server. |
 
 Every command takes an optional `region` (`US`, `EU`, `KR`, `TW`). All except `/mythicplus` also take an optional `game`. When omitted, `BLIZZARD_REGION` and `BLIZZARD_GAME` are used.
 
@@ -51,7 +55,12 @@ Set `BLIZZARD_GAME` to the version your guild plays so nobody has to pass the op
 3. Under **General Information**, copy the *Application ID* → `APPLICATION_ID`.
 4. Under **OAuth2 → URL Generator**, tick the `bot` and `applications.commands` scopes, then invite the bot with the generated URL.
 
-No privileged intents are needed — the bot only uses the `Guilds` intent and responds to slash commands.
+**Two privileged intents are required** for spam detection. Under **Bot → Privileged Gateway Intents**,
+enable **Message Content Intent** and **Server Members Intent**. Without them the bot fails to log in
+with a "disallowed intents" error.
+
+The bot also needs these permissions in the guild: Manage Messages, Moderate Members, Ban Members, and
+View Channel / Send Messages / Embed Links in the alert channel.
 
 ### 2. Create the Blizzard API client
 

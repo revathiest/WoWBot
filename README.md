@@ -10,7 +10,7 @@ Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no databas
 
 | Command | What it does |
 | --- | --- |
-| `/character <character> [realm] [game] [region]` | Level, race, class and spec, faction, guild, item level, achievement points, and last login, with the character's avatar and render. |
+| `/character <character> [realm] [game] [region]` | Level, race, class and spec, faction, guild, item level, achievement points, last login, and **every equipped item** linked to the right Wowhead database, plus the character's avatar and render. |
 | `/mythicplus <character> <realm> [region]` | Current-season Mythic+ rating and the best keystone runs, showing key level, dungeon, time, and whether it was timed. |
 | `/realm [realm] [game] [region]` | Realm type, category, timezone, up/down status, population, queue state, and connected realms. Suggests near matches on a miss. |
 | `/item <query> [region]` | Item lookup by **exact name** or item ID: quality, item level, type, slot, required level, sell price, and icon. |

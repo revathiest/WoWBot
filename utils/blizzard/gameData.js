@@ -3,7 +3,6 @@
 
 const { request } = require('./client');
 const { readConfig } = require('../../config');
-const { slugifyRealm } = require('../wow');
 
 /** Current WoW Token price, in copper, plus the time it was last updated. */
 function getWowTokenPrice(options = {}) {
@@ -15,9 +14,13 @@ function getRealmIndex(options = {}) {
   return request('/data/wow/realm/index', { ...options, namespace: 'dynamic' });
 }
 
-/** A single realm: type, timezone, category, and its connected-realm reference. */
-function getRealm(realm, options = {}) {
-  return request(`/data/wow/realm/${slugifyRealm(realm)}`, { ...options, namespace: 'dynamic' });
+/**
+ * A single realm: type, timezone, category, and its connected-realm reference.
+ * Takes an already-resolved slug — see the note in profile.js on why this must
+ * not slugify again.
+ */
+function getRealm(realmSlug, options = {}) {
+  return request(`/data/wow/realm/${realmSlug}`, { ...options, namespace: 'dynamic' });
 }
 
 /** Connected realm: up/down status, population, queue flag, and member realms. */

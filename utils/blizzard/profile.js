@@ -2,10 +2,16 @@
 // Character-facing endpoints from the WoW Profile API (namespace `profile-{region}`).
 
 const { request } = require('./client');
-const { slugifyRealm, encodeCharacterName } = require('../wow');
+const { encodeCharacterName } = require('../wow');
 
-function characterPath(realm, characterName, suffix = '') {
-  const realmSlug = slugifyRealm(realm);
+/**
+ * Builds a character path from an ALREADY-RESOLVED realm slug.
+ *
+ * Do not slugify here. Blizzard's rule deletes hyphens, so applying it to a slug
+ * that already contains one destroys it ("area-52" -> "area52") and every lookup
+ * 404s. Callers resolve names to slugs with `resolveRealm` first.
+ */
+function characterPath(realmSlug, characterName, suffix = '') {
   const name = encodeCharacterName(characterName);
   return `/profile/wow/character/${realmSlug}/${name}${suffix}`;
 }

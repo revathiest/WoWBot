@@ -1,6 +1,7 @@
 jest.mock('../../utils/blizzard/profile', () => ({
   getCharacterProfile: jest.fn(),
-  getCharacterMedia: jest.fn()
+  getCharacterMedia: jest.fn(),
+  getCharacterEquipment: jest.fn()
 }));
 
 // The realm resolver reads the live realm index; stub it so tests stay offline.
@@ -13,7 +14,11 @@ jest.mock('../../utils/blizzard/realms', () => ({
   }))
 }));
 
-const { getCharacterProfile, getCharacterMedia } = require('../../utils/blizzard/profile');
+const {
+  getCharacterProfile,
+  getCharacterMedia,
+  getCharacterEquipment
+} = require('../../utils/blizzard/profile');
 const { resolveRealm, findRealmGames } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/character');
@@ -42,6 +47,16 @@ const MEDIA = {
   ]
 };
 
+const EQUIPMENT = {
+  equipped_items: [
+    { slot: { type: 'HEAD', name: 'Head' }, name: 'Kodohide Helm', item: { id: 31988 } },
+    { slot: { type: 'CHEST', name: 'Chest' }, name: 'Kodohide Tunic', item: { id: 33694 }, level: { value: 141 } },
+    { slot: { type: 'SHIRT', name: 'Shirt' }, name: 'Orange Martial Shirt', item: { id: 2575 } },
+    { slot: { type: 'TABARD', name: 'Tabard' }, name: 'Tabard of the Protector', item: { id: 31404 } },
+    { slot: { type: 'MAIN_HAND', name: 'Main Hand' }, name: 'Ethereum Life-Staff', item: { id: 29981 } }
+  ]
+};
+
 function interaction(overrides = {}) {
   return createInteraction({
     commandName: 'character',
@@ -54,6 +69,7 @@ beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   getCharacterProfile.mockResolvedValue(PROFILE);
   getCharacterMedia.mockResolvedValue(MEDIA);
+  getCharacterEquipment.mockResolvedValue(EQUIPMENT);
   resolveRealm.mockImplementation(async query => ({
     slug: String(query).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ +/g, '-'),
     name: query,
@@ -121,6 +137,63 @@ describe('/character execute', () => {
       'Thrall',
       expect.objectContaining({ region: 'eu', game: 'retail' })
     );
+  });
+
+  it('lists equipped items in paperdoll order, linked to Wowhead', async () => {
+    const target = interaction({ game: 'anniversary' });
+
+    await command.execute(target);
+
+    const gear = field(replyEmbed(target), 'Equipment').value;
+    const lines = gear.split('\n');
+
+    expect(lines[0]).toBe('**Head** [Kodohide Helm](https://www.wowhead.com/tbc/item=31988)');
+    // Item level is appended only when the API supplies one (retail does, TBC does not).
+    expect(lines[1]).toBe('**Chest** [Kodohide Tunic](https://www.wowhead.com/tbc/item=33694) · 141');
+    expect(lines[2]).toContain('Main Hand');
+  });
+
+  it('omits cosmetic slots', async () => {
+    const target = interaction();
+
+    await command.execute(target);
+
+    const gear = field(replyEmbed(target), 'Equipment').value;
+    expect(gear).not.toContain('Martial Shirt');
+    expect(gear).not.toContain('Tabard');
+  });
+
+  it('splits equipment across fields within Discord limits', () => {
+    const many = {
+      equipped_items: command.EQUIPMENT_SLOTS.map((slot, i) => ({
+        slot: { type: slot, name: slot },
+        name: 'A rather long item name for padding purposes ' + i,
+        item: { id: 100000 + i }
+      }))
+    };
+
+    const fields = command.equipmentFields(many, 'retail');
+
+    expect(fields.length).toBeGreaterThan(1);
+    fields.forEach(f => expect(f.value.length).toBeLessThanOrEqual(1024));
+    expect(fields[0].name).toBe('Equipment');
+    expect(fields[1].name).toBe('​');
+  });
+
+  it('adds no equipment fields when gear is unavailable', () => {
+    expect(command.equipmentFields(null)).toEqual([]);
+    expect(command.equipmentFields({ equipped_items: [] })).toEqual([]);
+  });
+
+  it('still replies when the gear cannot be loaded', async () => {
+    getCharacterEquipment.mockRejectedValue(new Error('equipment down'));
+    const target = interaction();
+
+    await command.execute(target);
+
+    const embed = replyEmbed(target);
+    expect(embed.title).toContain('Thrall');
+    expect(field(embed, 'Equipment')).toBeUndefined();
   });
 
   it('still replies when the artwork cannot be loaded', async () => {

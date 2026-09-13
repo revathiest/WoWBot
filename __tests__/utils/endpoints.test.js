@@ -13,13 +13,20 @@ beforeEach(() => {
 const lastCall = () => request.mock.calls[request.mock.calls.length - 1];
 
 describe('profile endpoints', () => {
-  it('builds a slugged, lowercased character path', () => {
-    expect(profile.characterPath('Area 52', 'Thrall')).toBe(
+  it('uses the realm slug verbatim and lowercases the character name', () => {
+    expect(profile.characterPath('area-52', 'Thrall')).toBe(
       '/profile/wow/character/area-52/thrall'
     );
-    expect(profile.characterPath("Mal'Ganis", 'Sylvanas', '/equipment')).toBe(
+    expect(profile.characterPath('malganis', 'Sylvanas', '/equipment')).toBe(
       '/profile/wow/character/malganis/sylvanas/equipment'
     );
+  });
+
+  it('never re-slugifies the realm', () => {
+    // Regression: slugifyRealm deletes hyphens, so applying it to a slug that
+    // already has one produced "area52" and every lookup 404'd.
+    expect(profile.characterPath('area-52', 'Thrall')).toContain('/area-52/');
+    expect(profile.characterPath('argent-dawn', 'X')).toContain('/argent-dawn/');
   });
 
   it.each([
@@ -28,7 +35,7 @@ describe('profile endpoints', () => {
     ['getCharacterEquipment', [], '/profile/wow/character/area-52/thrall/equipment'],
     ['getMythicKeystoneProfile', [], '/profile/wow/character/area-52/thrall/mythic-keystone-profile']
   ])('%s targets %s in the profile namespace', async (method, extraArgs, expectedPath) => {
-    await profile[method]('Area 52', 'Thrall', ...extraArgs, { region: 'us' });
+    await profile[method]('area-52', 'Thrall', ...extraArgs, { region: 'us' });
 
     const [path, options] = lastCall();
     expect(path).toBe(expectedPath);
@@ -37,7 +44,7 @@ describe('profile endpoints', () => {
   });
 
   it('includes the season id when fetching a keystone season', async () => {
-    await profile.getMythicKeystoneSeason('Area 52', 'Thrall', 14, { region: 'eu' });
+    await profile.getMythicKeystoneSeason('area-52', 'Thrall', 14, { region: 'eu' });
 
     const [path, options] = lastCall();
     expect(path).toBe('/profile/wow/character/area-52/thrall/mythic-keystone-profile/season/14');
@@ -63,12 +70,17 @@ describe('game data endpoints', () => {
     expect(options.namespace).toBe('dynamic');
   });
 
-  it('slugs the realm name when fetching a realm', async () => {
-    await gameData.getRealm('Area 52', { region: 'us' });
+  it('uses the realm slug verbatim when fetching a realm', async () => {
+    await gameData.getRealm('area-52', { region: 'us' });
 
     const [path, options] = lastCall();
     expect(path).toBe('/data/wow/realm/area-52');
     expect(options.namespace).toBe('dynamic');
+  });
+
+  it('does not mangle a hyphenated slug', async () => {
+    await gameData.getRealm('argent-dawn', { region: 'us' });
+    expect(lastCall()[0]).toBe('/data/wow/realm/argent-dawn');
   });
 
   it('fetches a connected realm by id', async () => {

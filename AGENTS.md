@@ -38,6 +38,8 @@ Keep these boundaries — the tests rely on them for mocking:
 - **A 403 does not mean a namespace is absent.** An invalid namespace and an unauthorised one return an identical generic `403 Forbidden`, so probing for namespace names proves nothing either way. `classicann` (TBC Anniversary) is undocumented in the API reference and was found only on Blizzard's API forum. If a realm seems missing, suspect a namespace you do not know about before concluding the data is unpublished.
 - **Never derive a realm slug when you can resolve one.** Use `resolveRealm` from `utils/blizzard/realms.js`, which matches against the live index. Blizzard deletes hyphens and apostrophes (`Azjol-Nerub` → `azjolnerub`) but keeps accents (`festung-der-stürme`), so the naive transformation is wrong for roughly a quarter of realms. `slugifyRealm` implements the verified rule and exists as the offline fallback.
 - Character names must be lowercased in paths — use `encodeCharacterName`.
+- **Endpoint wrappers take realm SLUGS, never names.** `slugifyRealm` is not idempotent: it deletes hyphens, so applying it to an existing slug turns `area-52` into `area52` and every request 404s. Resolve once with `resolveRealm`, then pass the slug down.
+- Equipment payloads omit `level.value` on Classic and Anniversary; only retail supplies item levels. Render it conditionally.
 - Search endpoints return **localized maps** (`{ en_US: "..." }`) while direct document fetches return plain strings. Run anything user-visible through `localized()`.
 - Realm status and population live on the **connected realm**, not the realm document.
 - Mythic+ ratings are RGB component objects, not integers; `ratingColor()` packs them.

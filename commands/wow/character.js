@@ -2,7 +2,11 @@
 // /character — profile summary for a single character.
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getCharacterProfile, getCharacterMedia } = require('../../utils/blizzard/profile');
+const {
+  getCharacterProfile,
+  getCharacterMedia,
+  getCharacterEquipment
+} = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const { findRealmGames, resolveRealm } = require('../../utils/blizzard/realms');
 const {
@@ -17,8 +21,19 @@ const {
   classColor,
   discordTimestamp,
   formatNumber,
-  mediaAsset
+  mediaAsset,
+  wowheadItemUrl
 } = require('../../utils/wow');
+
+// Paperdoll order. Cosmetic slots (SHIRT, TABARD) are deliberately omitted so the
+// embed stays readable; everything a raider cares about is here.
+const EQUIPMENT_SLOTS = [
+  'HEAD', 'NECK', 'SHOULDER', 'BACK', 'CHEST', 'WRIST', 'HANDS', 'WAIST', 'LEGS',
+  'FEET', 'FINGER_1', 'FINGER_2', 'TRINKET_1', 'TRINKET_2', 'MAIN_HAND', 'OFF_HAND', 'RANGED'
+];
+
+const MAX_FIELD_CHARS = 1024;
+const MAX_EQUIPMENT_FIELDS = 3;
 
 const data = new SlashCommandBuilder()
   .setName('character')
@@ -34,7 +49,59 @@ addRealmOption(data);
 addGameOption(data);
 addRegionOption(data);
 
-function buildEmbed({ profile, media, region, realmSlug, characterName, scopeLabel }) {
+/**
+ * One line per equipped item, in paperdoll order, each linked to the Wowhead
+ * database for that game version. Item level is shown only when the API supplies
+ * it — TBC equipment payloads omit `level.value` entirely, where retail has it.
+ */
+function equipmentLines(equipment, game = 'retail') {
+  const bySlot = new Map(
+    (equipment?.equipped_items ?? []).map(item => [item.slot?.type, item])
+  );
+
+  return EQUIPMENT_SLOTS.map(slot => bySlot.get(slot))
+    .filter(Boolean)
+    .map(item => {
+      const name = item.name ?? 'Unknown item';
+      const id = item.item?.id;
+      const label = id ? `[${name}](${wowheadItemUrl(id, game)})` : name;
+      const itemLevel = item.level?.value;
+
+      return `**${item.slot?.name ?? '?'}** ${label}${
+        Number.isFinite(itemLevel) ? ` · ${itemLevel}` : ''
+      }`;
+    });
+}
+
+/** Packs the equipment lines into embed fields that respect Discord's limits. */
+function equipmentFields(equipment, game = 'retail') {
+  const lines = equipmentLines(equipment, game);
+  if (lines.length === 0) return [];
+
+  const groups = [];
+  let current = [];
+  let length = 0;
+
+  for (const line of lines) {
+    if (current.length > 0 && length + line.length + 1 > MAX_FIELD_CHARS) {
+      groups.push(current);
+      current = [];
+      length = 0;
+    }
+    current.push(line);
+    length += line.length + 1;
+  }
+
+  if (current.length > 0) groups.push(current);
+
+  return groups.slice(0, MAX_EQUIPMENT_FIELDS).map((group, index) => ({
+    // A zero-width space keeps continuation fields visually unlabelled.
+    name: index === 0 ? 'Equipment' : '​',
+    value: group.join('\n')
+  }));
+}
+
+function buildEmbed({ profile, media, equipment, region, realmSlug, characterName, scopeLabel, game }) {
   const specName = profile.active_spec?.name;
   const className = profile.character_class?.name;
   const specAndClass = [specName, className].filter(Boolean).join(' ') || 'Unknown';
@@ -76,6 +143,10 @@ function buildEmbed({ profile, media, region, realmSlug, characterName, scopeLab
   if (lastLogin) {
     embed.addFields({ name: 'Last Login', value: lastLogin, inline: true });
   }
+
+  // Equipment goes last so the stat fields stay at the top of the embed.
+  const gear = equipmentFields(equipment, game);
+  if (gear.length > 0) embed.addFields(gear);
 
   const avatar = mediaAsset(media, 'avatar');
   if (avatar) embed.setThumbnail(avatar);
@@ -134,17 +205,30 @@ async function execute(interaction) {
     throw err;
   }
 
-  // Artwork is a nicety; a failure here should not sink the whole reply.
-  let media = null;
-  try {
-    media = await getCharacterMedia(realmSlug, characterName, { region, game });
-  } catch (err) {
-    console.warn(`Could not load character media for ${characterName}-${realmSlug}: ${err.message}`);
-  }
+  // Artwork and gear are extras; neither failing should sink the whole reply.
+  const [media, equipment] = await Promise.all([
+    getCharacterMedia(realmSlug, characterName, { region, game }).catch(err => {
+      console.warn(`Could not load media for ${characterName}-${realmSlug}: ${err.message}`);
+      return null;
+    }),
+    getCharacterEquipment(realmSlug, characterName, { region, game }).catch(err => {
+      console.warn(`Could not load equipment for ${characterName}-${realmSlug}: ${err.message}`);
+      return null;
+    })
+  ]);
 
   await interaction.editReply({
     embeds: [
-      buildEmbed({ profile, media, region, realmSlug, characterName, scopeLabel: scope.label })
+      buildEmbed({
+        profile,
+        media,
+        equipment,
+        region,
+        realmSlug,
+        characterName,
+        scopeLabel: scope.label,
+        game
+      })
     ]
   });
 }
@@ -154,5 +238,8 @@ module.exports = {
   help: 'Shows level, class, spec, guild, item level, and achievement points for a character.',
   category: 'WoW',
   buildEmbed,
-  execute
+  equipmentFields,
+  equipmentLines,
+  execute,
+  EQUIPMENT_SLOTS
 };

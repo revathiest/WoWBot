@@ -79,7 +79,7 @@ cp .env.example .env
 | --- | --- | --- |
 | `DISCORD_TOKEN` | yes | Bot token. |
 | `APPLICATION_ID` | yes | Discord application (client) ID. |
-| `GUILD_ID` | no | When set, slash commands register to this guild only and appear instantly, and any global commands are removed so nothing appears twice. Leave blank to register globally, which can take up to an hour to propagate. |
+| `GUILD_ID` | no | When set, slash commands **register** to this guild only and appear instantly, and any global commands are removed so nothing appears twice. Leave blank to register globally, which can take up to an hour to propagate. **This does not scope which guilds the bot serves** — see the warning below. |
 | `BLIZZARD_CLIENT_ID` | yes | Battle.net API client ID. |
 | `BLIZZARD_CLIENT_SECRET` | yes | Battle.net API client secret. |
 | `BLIZZARD_REGION` | no | Default region: `us`, `eu`, `kr`, or `tw`. Defaults to `us`. |
@@ -154,6 +154,14 @@ Throw from `execute` and the interaction handler will translate it into a sensib
 - **Command scope.** Guild-scoped and global commands stack in Discord's UI, so a command registered both ways is listed twice. When `GUILD_ID` is set, the bot registers to that guild and then clears the global set. The wipe runs only after the guild registration succeeds, so a failure there cannot leave the application with no commands.
 
   > ⚠️ Because of this, do not point a development instance at the same `APPLICATION_ID` as a production instance that registers globally — starting the dev bot will remove production's commands. Use a separate Discord application for development.
+
+- **`GUILD_ID` does not isolate an instance.** It controls where commands are *registered*, nothing more. A logged-in token receives interactions and messages from **every guild the bot has been invited to**, whatever `GUILD_ID` says.
+
+  > ⚠️ **Never run two instances on one bot token.** Both receive every interaction and race to answer it. The loser gets `DiscordAPIError[10062] Unknown interaction` — which looks like a timeout but is not — and users see whichever copy won, including "command no longer available" from a stale deployment that lacks a newer command. Giving the second instance a different `GUILD_ID` does **not** prevent this. Use a **separate Discord application** (separate token) per environment.
+
+  The bot prints the guilds it is serving at startup and warns when it is in any beyond `GUILD_ID`, so this is visible immediately rather than after an afternoon of debugging.
+
+- **`node --watch` does not pick up new command files.** It watches the module graph, and commands are loaded dynamically at ready-time, so a **brand-new** file in `commands/` never triggers a restart. Restart `npm run dev` manually after adding a command, or the running process will keep answering "that command is no longer available".
 
 - **Token caching.** One OAuth token is fetched on first use and reused until it expires (about 24 hours), refreshed a minute early. Concurrent requests share a single token fetch.
 - **Retries.** Rate limits (429), server errors (5xx), and network failures are retried up to three times with backoff, honouring `Retry-After`. 404s and other 4xx responses fail immediately.

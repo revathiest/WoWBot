@@ -46,33 +46,46 @@ function isDeadInteraction(err) {
 }
 
 /**
- * The two codes mean very different things, and conflating them hides the cause:
+ * Explains a dead interaction.
  *
- *   10062 Unknown interaction  - nobody answered in time. Either this process was
- *                                too slow, or the event reached us late.
- *   40060 Already acknowledged - somebody DID answer. With one process that is
- *                                impossible, so it means a second instance is
- *                                logged in with the same token and won the race.
+ * The obvious reading of these codes is wrong, and cost a long debugging session:
  *
- * `age` is how long the interaction had existed by the time we gave up, derived
- * from its snowflake. Discord allows 3000ms. An age far below that with a 10062
- * points at the gateway delivering late rather than at slow command code.
+ *   10062 Unknown interaction  - Discord no longer has a record of it. The lazy
+ *                                assumption is "we were too slow", but when the
+ *                                interaction is still YOUNG this instead means
+ *                                the record was already consumed -- i.e. ANOTHER
+ *                                process sharing this token answered first, and
+ *                                Discord retired the interaction before our
+ *                                callback landed.
+ *   40060 Already acknowledged - the same race, caught a moment earlier, while
+ *                                the record still existed.
+ *
+ * So a duplicate instance usually surfaces as 10062, not 40060. `age` is what
+ * separates the two readings: a young interaction exonerates this process.
  */
 function describeDeadInteraction(err, interaction) {
   const created = interaction?.createdTimestamp;
-  const age = Number.isFinite(created) ? `${Date.now() - created}ms old` : 'age unknown';
+  const ageMs = Number.isFinite(created) ? Date.now() - created : null;
+  const age = ageMs === null ? 'age unknown' : `${ageMs}ms old`;
+
+  // Comfortably inside Discord's 3s budget: we were not slow, so somebody else
+  // must have answered.
+  if (ageMs !== null && ageMs < 2000) {
+    return (
+      `${age}, well inside the 3000ms limit, so this process answered in time. ` +
+      'The interaction was already consumed, which means ANOTHER INSTANCE sharing ' +
+      'this bot token answered first. Check for a second `npm run dev` or `npm start` ' +
+      'in this directory, and for a remote deployment using the same token.'
+    );
+  }
 
   if (err?.code === 40060) {
-    return (
-      `already answered by someone else (${age}). ` +
-      'This almost always means a second copy of the bot is running with the same ' +
-      'token — check for another local process, or a deployment still live on your host.'
-    );
+    return `already answered by someone else (${age}) — another instance is sharing this token.`;
   }
 
   return (
     `expired before it could be answered (${age}, Discord allows 3000ms). ` +
-    'If that age is small, the event reached this process late.'
+    'Either this process stalled, or the event arrived late.'
   );
 }
 

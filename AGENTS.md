@@ -32,6 +32,12 @@ Keep these boundaries — the tests rely on them for mocking:
 - Handle `404` inside the command when a specific message helps the user (name the realm slug that was tried). Let every other error propagate; `handlers/interactionHandler.js` translates it.
 - Use `addRegionOption` / `resolveRegion` from `utils/commandOptions.js` so every command takes `region` identically.
 
+## Discord gotchas
+
+- **`GUILD_ID` scopes command registration only.** It does not scope which guilds the process serves — a token receives events from every guild the bot has joined. Two instances on one token race for every interaction; the loser sees `10062 Unknown interaction`, which reads like a timeout and is not. Separate environments need separate Discord applications, not a different `GUILD_ID`.
+- **`10062` on a young interaction means a duplicate instance, not slowness.** If the interaction is well inside the 3000ms budget, this process answered in time and something else consumed the token first. `describeDeadInteraction` in `handlers/interactionHandler.js` encodes this; do not "simplify" it back to a plain timeout message.
+- **`node --watch` ignores brand-new files.** Commands are required dynamically at ready-time, so adding a file under `commands/` does not restart a `npm run dev` session. The loader's "just drop a file in" convenience does not hold in watch mode.
+
 ## Blizzard API gotchas
 
 - Namespaces are mandatory: `profile-{region}` for characters, `dynamic-{region}` for realms and the token, `static-{region}` for items.

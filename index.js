@@ -9,6 +9,7 @@ const { registerCommands } = require('./utils/commandRegistration');
 const { registerInteractionHandler } = require('./handlers/interactionHandler');
 const { registerMessageHandler } = require('./handlers/messageHandler');
 const { loadConfig: loadSpamConfig } = require('./utils/spam/config');
+const { describeGuilds, guildScopeWarnings } = require('./utils/guildScope');
 
 const config = readConfig();
 const problems = validateConfig(config);
@@ -46,6 +47,12 @@ registerMessageHandler(client, Events);
 client.once(Events.ClientReady, async readyClient => {
   console.log(`🟢 Logged in as ${readyClient.user.tag}`);
   console.log(`   Default region: ${config.blizzard.region.toUpperCase()} • locale: ${config.blizzard.locale}`);
+
+  // Which guilds this process actually serves. A token receives events from every
+  // guild it has joined, regardless of GUILD_ID, so make that visible up front.
+  const guilds = [...readyClient.guilds.cache.values()];
+  console.log(`   Guilds (${guilds.length}): ${describeGuilds(guilds)}`);
+  guildScopeWarnings(guilds, config.discord.guildId).forEach(line => console.warn(`⚠️  ${line}`));
 
   const spam = loadSpamConfig();
   console.log(

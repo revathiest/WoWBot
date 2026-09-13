@@ -146,19 +146,41 @@ describe('dead interactions', () => {
     expect(isDeadInteraction(undefined)).toBe(false);
   });
 
-  it('distinguishes the two codes, because their causes differ', () => {
-    // Pin the clock: real time passes between building the fixture and asserting.
+  it('blames a duplicate instance when the interaction is still young', () => {
+    // The case that actually happened: a 288ms-old interaction returning 10062.
+    // This process was well inside the budget, so something else consumed the
+    // token first. Reading 10062 as "we were slow" sent a real investigation
+    // down the wrong path for hours.
     const now = 1_700_000_000_000;
     jest.spyOn(Date, 'now').mockReturnValue(now);
 
-    const expired = describeDeadInteraction({ code: 10062 }, { createdTimestamp: now - 800 });
-    expect(expired).toContain('800ms old');
-    expect(expired).toContain('3000ms');
+    const young = describeDeadInteraction({ code: 10062 }, { createdTimestamp: now - 288 });
 
-    // 40060 is the fingerprint of a second instance answering first.
-    const taken = describeDeadInteraction({ code: 40060 }, { createdTimestamp: now - 100 });
+    expect(young).toContain('288ms old');
+    expect(young).toContain('answered in time');
+    expect(young).toContain('ANOTHER INSTANCE');
+    expect(young).toContain('npm run dev');
+  });
+
+  it('blames latency only when the interaction really was old', () => {
+    const now = 1_700_000_000_000;
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+
+    const old = describeDeadInteraction({ code: 10062 }, { createdTimestamp: now - 2900 });
+
+    expect(old).toContain('2900ms old');
+    expect(old).toContain('expired');
+    expect(old).not.toContain('ANOTHER INSTANCE');
+  });
+
+  it('treats 40060 on an older interaction as a shared token too', () => {
+    const now = 1_700_000_000_000;
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+
+    const taken = describeDeadInteraction({ code: 40060 }, { createdTimestamp: now - 2500 });
+
     expect(taken).toContain('already answered');
-    expect(taken).toContain('second copy of the bot');
+    expect(taken).toContain('sharing this token');
   });
 
   it('copes with an interaction that has no timestamp', () => {

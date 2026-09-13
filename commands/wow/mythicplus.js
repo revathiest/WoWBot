@@ -124,8 +124,11 @@ async function execute(interaction) {
 
   // The index only covers the current weekly period. The latest season endpoint
   // has the character's actual best runs, so prefer it when one is available.
+  // Blizzard does not return `seasons` in chronological order — a live payload
+  // looked like [18, 11, 12, 13, 17, ...] — so take the highest id, not the last.
   const seasons = profile.seasons ?? [];
-  const latestSeasonId = seasons.length > 0 ? seasons[seasons.length - 1].id : null;
+  const seasonIds = seasons.map(season => Number(season?.id)).filter(Number.isFinite);
+  const latestSeasonId = seasonIds.length > 0 ? Math.max(...seasonIds) : null;
 
   if (latestSeasonId) {
     try {

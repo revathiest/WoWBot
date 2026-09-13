@@ -110,6 +110,39 @@ describe('/mythicplus execute', () => {
     expect(lines[2]).toContain('+8');
   });
 
+  it('picks the highest season id, not the last one listed', async () => {
+    // Blizzard returns seasons unsorted; this shape came from a live payload.
+    getMythicKeystoneProfile.mockResolvedValue({
+      current_period: { best_runs: [] },
+      seasons: [{ id: 18 }, { id: 11 }, { id: 12 }, { id: 17 }, { id: 15 }]
+    });
+
+    await command.execute(interaction());
+
+    expect(getMythicKeystoneSeason).toHaveBeenCalledWith(
+      'Area 52',
+      'Thrall',
+      18,
+      expect.anything()
+    );
+  });
+
+  it('ignores malformed season entries', async () => {
+    getMythicKeystoneProfile.mockResolvedValue({
+      current_period: { best_runs: [] },
+      seasons: [{ id: 'nonsense' }, {}, { id: 9 }]
+    });
+
+    await command.execute(interaction());
+
+    expect(getMythicKeystoneSeason).toHaveBeenCalledWith(
+      'Area 52',
+      'Thrall',
+      9,
+      expect.anything()
+    );
+  });
+
   it('falls back to the current period when the season call fails', async () => {
     getMythicKeystoneSeason.mockRejectedValue(new Error('season down'));
     const target = interaction();

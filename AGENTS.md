@@ -25,6 +25,7 @@ Keep these boundaries — the tests rely on them for mocking:
 
 - One file per command under `commands/`, exporting `data` (a `SlashCommandBuilder`), `execute(interaction)`, plus `help` and `category` strings.
 - The loader is recursive and automatic. Never maintain a manual command list.
+- Registration scope is driven by `GUILD_ID`: set means guild-scoped plus a wipe of the global set (duplicates otherwise), unset means global. The wipe must stay conditional on the guild registration having succeeded — clearing first would leave the application with no commands if the guild call fails.
 - Export `buildEmbed` (and any pure helper) so it can be tested without an interaction.
 - Always `deferReply()` first — Blizzard calls routinely exceed Discord's 3-second interaction window.
 - Handle `404` inside the command when a specific message helps the user (name the realm slug that was tried). Let every other error propagate; `handlers/interactionHandler.js` translates it.

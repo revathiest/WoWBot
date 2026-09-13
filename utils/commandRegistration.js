@@ -47,9 +47,29 @@ function loadCommandsRecursively(dir = COMMANDS_DIR, commandMap = new Map()) {
 }
 
 /**
+ * Removes every globally registered command for the application.
+ *
+ * Guild-scoped and global commands are additive in Discord's UI, so a command
+ * registered both ways shows up twice. Returns how many were removed.
+ */
+async function clearGlobalCommands(rest, applicationId) {
+  const existing = await rest.get(Routes.applicationCommands(applicationId));
+
+  if (!Array.isArray(existing) || existing.length === 0) return 0;
+
+  await rest.put(Routes.applicationCommands(applicationId), { body: [] });
+
+  return existing.length;
+}
+
+/**
  * Loads commands onto `client.commands` and pushes their definitions to Discord.
  * Registers to a single guild when GUILD_ID is set (updates are instant, which is
  * what you want in development) and globally otherwise.
+ *
+ * When registering to a guild, any leftover global commands are cleared so they
+ * do not appear twice. That only happens after the guild registration succeeds,
+ * so a failure there cannot leave the application with no commands at all.
  */
 async function registerCommands(client, options = {}) {
   const config = options.config ?? readConfig();
@@ -80,6 +100,19 @@ async function registerCommands(client, options = {}) {
     console.log(`✅ Registered ${definitions.length} command(s) ${scope}: ${names}`);
   } catch (err) {
     console.error(`❌ Failed to register slash commands ${scope}:`, err);
+    return commandMap;
+  }
+
+  if (guildId) {
+    try {
+      const removed = await clearGlobalCommands(rest, applicationId);
+
+      if (removed > 0) {
+        console.log(`🧹 Removed ${removed} global command(s) to avoid duplicates.`);
+      }
+    } catch (err) {
+      console.warn(`⚠️  Could not clear global commands: ${err.message}`);
+    }
   }
 
   return commandMap;
@@ -87,6 +120,7 @@ async function registerCommands(client, options = {}) {
 
 module.exports = {
   COMMANDS_DIR,
+  clearGlobalCommands,
   loadCommandsRecursively,
   registerCommands
 };

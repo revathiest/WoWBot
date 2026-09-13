@@ -2,6 +2,7 @@ const path = require('path');
 const { Routes } = require('discord.js');
 const {
   COMMANDS_DIR,
+  clearGlobalCommands,
   loadCommandsRecursively,
   registerCommands
 } = require('../../utils/commandRegistration');
@@ -88,7 +89,7 @@ describe('registerCommands', () => {
   });
 
   it('publishes to a single guild when GUILD_ID is set', async () => {
-    const rest = { put: jest.fn(async () => {}) };
+    const rest = { put: jest.fn(async () => {}), get: jest.fn(async () => []) };
     const config = { discord: { ...baseConfig.discord, guildId: 'guild-id' } };
 
     await registerCommands({}, { config, rest, commandMap: new Map([['token', fakeCommand('token')]]) });
@@ -119,5 +120,85 @@ describe('registerCommands', () => {
     ).resolves.toBeInstanceOf(Map);
 
     expect(console.error).toHaveBeenCalled();
+  });
+});
+
+describe('clearing global commands', () => {
+  const guildConfig = { discord: { ...baseConfig.discord, guildId: 'guild-id' } };
+  const commandMap = () => new Map([['token', fakeCommand('token')]]);
+
+  it('removes leftover global commands after a guild registration', async () => {
+    const rest = {
+      put: jest.fn(async () => {}),
+      get: jest.fn(async () => [{ id: '1', name: 'token' }, { id: '2', name: 'realm' }])
+    };
+
+    await registerCommands({}, { config: guildConfig, rest, commandMap: commandMap() });
+
+    expect(rest.put).toHaveBeenCalledWith(Routes.applicationCommands('app-id'), { body: [] });
+    // The guild registration must happen first, the wipe second.
+    expect(rest.put.mock.calls[0][0]).toBe(Routes.applicationGuildCommands('app-id', 'guild-id'));
+    expect(rest.put.mock.calls[1][0]).toBe(Routes.applicationCommands('app-id'));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Removed 2 global command(s)'));
+  });
+
+  it('does not issue a wipe when there are no global commands', async () => {
+    const rest = { put: jest.fn(async () => {}), get: jest.fn(async () => []) };
+
+    await registerCommands({}, { config: guildConfig, rest, commandMap: commandMap() });
+
+    expect(rest.put).toHaveBeenCalledTimes(1);
+    expect(rest.put).not.toHaveBeenCalledWith(Routes.applicationCommands('app-id'), { body: [] });
+  });
+
+  it('leaves global commands alone when the guild registration failed', async () => {
+    const rest = {
+      put: jest.fn(async () => { throw new Error('missing access'); }),
+      get: jest.fn(async () => [{ id: '1', name: 'token' }])
+    };
+
+    await registerCommands({}, { config: guildConfig, rest, commandMap: commandMap() });
+
+    // Wiping here would leave the application with no commands at all.
+    expect(rest.get).not.toHaveBeenCalled();
+    expect(rest.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('never wipes when registering globally', async () => {
+    const rest = { put: jest.fn(async () => {}), get: jest.fn(async () => []) };
+
+    await registerCommands({}, { config: baseConfig, rest, commandMap: commandMap() });
+
+    expect(rest.get).not.toHaveBeenCalled();
+    expect(rest.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the guild registration when the wipe fails', async () => {
+    const rest = {
+      put: jest.fn(async () => {}),
+      get: jest.fn(async () => { throw new Error('rate limited'); })
+    };
+
+    await expect(
+      registerCommands({}, { config: guildConfig, rest, commandMap: commandMap() })
+    ).resolves.toBeInstanceOf(Map);
+
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Could not clear global commands'));
+  });
+
+  it('reports how many commands it removed', async () => {
+    const rest = {
+      put: jest.fn(async () => {}),
+      get: jest.fn(async () => [{ id: '1' }, { id: '2' }, { id: '3' }])
+    };
+
+    await expect(clearGlobalCommands(rest, 'app-id')).resolves.toBe(3);
+  });
+
+  it('tolerates a malformed listing', async () => {
+    const rest = { put: jest.fn(async () => {}), get: jest.fn(async () => null) };
+
+    await expect(clearGlobalCommands(rest, 'app-id')).resolves.toBe(0);
+    expect(rest.put).not.toHaveBeenCalled();
   });
 });

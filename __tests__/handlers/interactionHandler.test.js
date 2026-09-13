@@ -5,6 +5,7 @@ const {
   handleInteraction,
   isDeadInteraction,
   registerInteractionHandler,
+  resetIgnoredGuilds,
   respondWithError
 } = require('../../handlers/interactionHandler');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
@@ -13,6 +14,7 @@ const { createInteraction } = require('../helpers/interaction');
 beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});
+  jest.spyOn(console, 'log').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -246,6 +248,8 @@ describe('guild scoping', () => {
   // guild. This is the mechanism that makes that work.
   const originalGuildId = process.env.GUILD_ID;
 
+  beforeEach(() => resetIgnoredGuilds());
+
   afterEach(() => {
     if (originalGuildId === undefined) delete process.env.GUILD_ID;
     else process.env.GUILD_ID = originalGuildId;
@@ -278,6 +282,40 @@ describe('guild scoping', () => {
     await handleInteraction(interaction);
 
     expect(execute).toHaveBeenCalled();
+  });
+
+  it('announces an ignored guild once, then stays quiet', async () => {
+    // A pinned dev instance receives every interaction from the busy production
+    // guild. Logging each would drown the dev console.
+    process.env.GUILD_ID = 'mine';
+    const commands = new Map([['token', { execute: jest.fn() }]]);
+
+    for (let i = 0; i < 5; i += 1) {
+      const interaction = createInteraction({ commandName: 'token', commands });
+      interaction.guildId = 'theirs';
+      await handleInteraction(interaction);
+    }
+
+    const notices = console.log.mock.calls.filter(args =>
+      String(args[0]).includes('Ignoring events from guild theirs')
+    );
+    expect(notices).toHaveLength(1);
+  });
+
+  it('announces each ignored guild separately', async () => {
+    process.env.GUILD_ID = 'mine';
+    const commands = new Map([['token', { execute: jest.fn() }]]);
+
+    for (const guildId of ['a', 'b']) {
+      const interaction = createInteraction({ commandName: 'token', commands });
+      interaction.guildId = guildId;
+      await handleInteraction(interaction);
+    }
+
+    const notices = console.log.mock.calls.filter(args =>
+      String(args[0]).includes('Ignoring events from guild')
+    );
+    expect(notices).toHaveLength(2);
   });
 
   it('ignores DMs', async () => {

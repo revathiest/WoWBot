@@ -108,16 +108,40 @@ async function respondWithError(interaction, content) {
   }
 }
 
+/**
+ * Guilds this instance has already reported ignoring.
+ *
+ * A pinned dev instance still receives every interaction from the busy
+ * production guild. Logging each one would bury the dev console in noise, so
+ * announce each guild once and then stay quiet.
+ */
+const ignoredGuilds = new Set();
+
+function noteIgnoredGuild(guildId, configuredGuildId) {
+  if (!guildId || ignoredGuilds.has(guildId)) return;
+
+  ignoredGuilds.add(guildId);
+  console.log(
+    `↪️  Ignoring events from guild ${guildId} — this instance is pinned to ${configuredGuildId}. ` +
+      'Further notices for that guild are suppressed.'
+  );
+}
+
+/** Tests only. */
+function resetIgnoredGuilds() {
+  ignoredGuilds.clear();
+}
+
 async function handleInteraction(interaction) {
   if (!interaction.isChatInputCommand?.()) return;
 
-  // GUILD_ID is optional. Left blank (the normal case) this instance serves every
-  // guild it has joined. Set, it pins the instance to one guild and ignores the
-  // rest, which is how two deployments can share a token without racing.
-  if (!isGuildInScope(interaction.guildId, readConfig().discord.guildId)) {
-    console.log(
-      `↪️  Ignoring /${interaction.commandName} from guild ${interaction.guildId ?? 'DM'} — outside this instance's scope.`
-    );
+  // GUILD_ID pins this instance to one guild; blank means serve them all.
+  // Pinning is what lets a production and a dev instance share one bot token
+  // without racing for the right to answer.
+  const configuredGuildId = readConfig().discord.guildId;
+
+  if (!isGuildInScope(interaction.guildId, configuredGuildId)) {
+    noteIgnoredGuild(interaction.guildId, configuredGuildId);
     return;
   }
 
@@ -166,6 +190,7 @@ module.exports = {
   describeDeadInteraction,
   describeError,
   isDeadInteraction,
+  resetIgnoredGuilds,
   handleInteraction,
   registerInteractionHandler,
   respondWithError

@@ -17,8 +17,15 @@ describe('guildScopeWarnings', () => {
     expect(guildScopeWarnings([guild('g1', 'Home')], 'g1')).toEqual([]);
   });
 
-  it('stays quiet when no guild is configured', () => {
-    expect(guildScopeWarnings([guild('g1', 'Home'), guild('g2', 'Other')], null)).toEqual([]);
+  it('warns when unpinned across several guilds, the configuration that races', () => {
+    const warnings = guildScopeWarnings([guild('g1', 'Home'), guild('g2', 'Other')], null).join(' ');
+
+    expect(warnings).toContain('serves all 2 guilds');
+    expect(warnings).toContain('Set GUILD_ID on each to pin them');
+  });
+
+  it('stays quiet when unpinned in a single guild', () => {
+    expect(guildScopeWarnings([guild('g1', 'Home')], null)).toEqual([]);
   });
 
   it('names the guilds a pinned instance is ignoring', () => {

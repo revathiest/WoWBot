@@ -37,7 +37,19 @@ function describeGuilds(guilds) {
  * @returns {string[]} warning lines; empty when the scope is unambiguous
  */
 function guildScopeWarnings(guilds, guildId) {
-  if (!guildId || guilds.length === 0) return [];
+  if (guilds.length === 0) return [];
+
+  // Unpinned while in several guilds: fine for a single deployment, but this is
+  // exactly the configuration in which a second instance starts racing.
+  if (!guildId) {
+    if (guilds.length < 2) return [];
+
+    return [
+      `GUILD_ID is not set, so this instance serves all ${guilds.length} guilds: ${describeGuilds(guilds)}.`,
+      'If another instance (dev or production) also runs on this token, both will ' +
+        'answer the same commands and conflict. Set GUILD_ID on each to pin them.'
+    ];
+  }
 
   const configured = guilds.find(guild => guild.id === guildId);
   const others = guilds.filter(guild => guild.id !== guildId);

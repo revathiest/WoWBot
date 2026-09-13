@@ -100,6 +100,40 @@ For local development, `npm run dev` restarts on file changes.
 
 ---
 
+## Running production and dev at the same time
+
+One bot token, two instances, no conflict — pin each one to its own server with
+`GUILD_ID`.
+
+| Instance | `GUILD_ID` | Serves |
+| --- | --- | --- |
+| Production (PebbleHost) | your main server's id | Main server only |
+| Dev (local, `npm run dev`) | your test server's id | Test server only |
+
+A pinned instance registers commands **only** to its guild and **ignores every
+interaction and message from anywhere else**. Both instances still receive all
+events — that is unavoidable on a shared token — but only the one that owns the
+guild acts, so exactly one answers.
+
+To get a server id: enable Developer Mode in Discord (User Settings → Advanced),
+then right-click the server and choose *Copy Server ID*.
+
+### Two rules that keep it working
+
+1. **Set `GUILD_ID` on both.** If either is left blank, that instance serves
+   *every* guild, takes over the other's server, and the two start racing for
+   every command. The bot warns at startup when it is unpinned in more than one
+   guild.
+2. **This holds only while production serves one server.** If production ever
+   needs a second server, it cannot be pinned — and then it will conflict with
+   dev again. At that point, give dev its own Discord application and token,
+   which removes the problem structurally rather than by configuration.
+
+A pinned instance logs each ignored guild **once** on first sight and then stays
+quiet, so a dev console is not buried by traffic from a busy production server.
+
+---
+
 ## Deploying to PebbleHost
 
 1. Upload the project **without** `node_modules/` and `.env`.

@@ -1,0 +1,31 @@
+{
+  "name": "wow-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot that surfaces World of Warcraft character, realm, and game data from the Blizzard Battle.net API.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node -e \"process.stdout.write('\\x1Bc')\" && node index.js",
+    "dev": "node -e \"process.stdout.write('\\x1Bc')\" && node --watch index.js",
+    "test": "node -e \"process.stdout.write('\\x1Bc')\" && jest --coverage",
+    "setup": "npm ci --no-audit && npm test"
+  },
+  "keywords": [
+    "discord",
+    "discord.js",
+    "world-of-warcraft",
+    "blizzard",
+    "battle.net"
+  ],
+  "author": "Kenneth Hart",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.4",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "jest": "^30.4.2"
+  }
+}

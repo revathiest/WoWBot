@@ -1,0 +1,1 @@
+Non-JS files in the commands tree must be ignored by the loader.

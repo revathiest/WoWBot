@@ -1,0 +1,17 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Dependency and build artifacts
+node_modules/
+coverage/
+
+# Logs
+logs/
+*.log
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+.vscode/launch.json

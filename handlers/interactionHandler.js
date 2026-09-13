@@ -45,6 +45,37 @@ function isDeadInteraction(err) {
   return DEAD_INTERACTION_CODES.has(err?.code);
 }
 
+/**
+ * The two codes mean very different things, and conflating them hides the cause:
+ *
+ *   10062 Unknown interaction  - nobody answered in time. Either this process was
+ *                                too slow, or the event reached us late.
+ *   40060 Already acknowledged - somebody DID answer. With one process that is
+ *                                impossible, so it means a second instance is
+ *                                logged in with the same token and won the race.
+ *
+ * `age` is how long the interaction had existed by the time we gave up, derived
+ * from its snowflake. Discord allows 3000ms. An age far below that with a 10062
+ * points at the gateway delivering late rather than at slow command code.
+ */
+function describeDeadInteraction(err, interaction) {
+  const created = interaction?.createdTimestamp;
+  const age = Number.isFinite(created) ? `${Date.now() - created}ms old` : 'age unknown';
+
+  if (err?.code === 40060) {
+    return (
+      `already answered by someone else (${age}). ` +
+      'This almost always means a second copy of the bot is running with the same ' +
+      'token — check for another local process, or a deployment still live on your host.'
+    );
+  }
+
+  return (
+    `expired before it could be answered (${age}, Discord allows 3000ms). ` +
+    'If that age is small, the event reached this process late.'
+  );
+}
+
 /** Replies or edits, depending on whether the command already deferred. */
 async function respondWithError(interaction, content) {
   try {
@@ -80,8 +111,7 @@ async function handleInteraction(interaction) {
     // to and nothing to fix in the command, so log one line, not a stack trace.
     if (isDeadInteraction(err)) {
       console.warn(
-        `⚠️  /${interaction.commandName} could not be answered: the interaction expired. ` +
-          'This usually means the bot was restarting when the command was used.'
+        `⚠️  /${interaction.commandName} [${err.code}] ${describeDeadInteraction(err, interaction)}`
       );
       return;
     }
@@ -98,6 +128,7 @@ function registerInteractionHandler(client, Events) {
 
 module.exports = {
   DEAD_INTERACTION_CODES,
+  describeDeadInteraction,
   describeError,
   isDeadInteraction,
   handleInteraction,

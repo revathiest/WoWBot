@@ -1,6 +1,7 @@
 const { MessageFlags } = require('discord.js');
 const {
   describeError,
+  describeDeadInteraction,
   handleInteraction,
   isDeadInteraction,
   registerInteractionHandler,
@@ -143,6 +144,23 @@ describe('dead interactions', () => {
     expect(isDeadInteraction(deadError(40060))).toBe(true);
     expect(isDeadInteraction(new Error('something else'))).toBe(false);
     expect(isDeadInteraction(undefined)).toBe(false);
+  });
+
+  it('distinguishes the two codes, because their causes differ', () => {
+    const now = Date.now();
+
+    const expired = describeDeadInteraction({ code: 10062 }, { createdTimestamp: now - 800 });
+    expect(expired).toContain('800ms old');
+    expect(expired).toContain('3000ms');
+
+    // 40060 is the fingerprint of a second instance answering first.
+    const taken = describeDeadInteraction({ code: 40060 }, { createdTimestamp: now - 100 });
+    expect(taken).toContain('already answered');
+    expect(taken).toContain('second copy of the bot');
+  });
+
+  it('copes with an interaction that has no timestamp', () => {
+    expect(describeDeadInteraction({ code: 10062 }, {})).toContain('age unknown');
   });
 
   it('does not try to respond when the interaction expired', async () => {

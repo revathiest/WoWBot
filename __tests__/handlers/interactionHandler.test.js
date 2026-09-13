@@ -2,6 +2,7 @@ const { MessageFlags } = require('discord.js');
 const {
   describeError,
   handleInteraction,
+  isDeadInteraction,
   registerInteractionHandler,
   respondWithError
 } = require('../../handlers/interactionHandler');
@@ -129,6 +130,62 @@ describe('handleInteraction', () => {
     expect(interaction.editReply).toHaveBeenCalledWith({
       content: expect.stringContaining('Double-check the spelling')
     });
+  });
+});
+
+describe('dead interactions', () => {
+  // 10062 Unknown interaction / 40060 already acknowledged. Both mean the
+  // interaction cannot be answered; retrying only produces a second error.
+  const deadError = code => Object.assign(new Error('Unknown interaction'), { code });
+
+  it('recognises both dead codes', () => {
+    expect(isDeadInteraction(deadError(10062))).toBe(true);
+    expect(isDeadInteraction(deadError(40060))).toBe(true);
+    expect(isDeadInteraction(new Error('something else'))).toBe(false);
+    expect(isDeadInteraction(undefined)).toBe(false);
+  });
+
+  it('does not try to respond when the interaction expired', async () => {
+    const execute = jest.fn(async () => {
+      throw deadError(10062);
+    });
+    const interaction = createInteraction({
+      commandName: 'spam',
+      commands: new Map([['spam', { execute }]])
+    });
+
+    await handleInteraction(interaction);
+
+    // The cascade this prevents: reply() -> 10062, then reply() again -> 40060.
+    expect(interaction.reply).not.toHaveBeenCalled();
+    expect(interaction.editReply).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('expired'));
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet when the error response itself hits a dead interaction', async () => {
+    const interaction = createInteraction();
+    interaction.reply.mockRejectedValue(deadError(40060));
+
+    await respondWithError(interaction, 'nope');
+
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('interaction is gone'));
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('still reports ordinary command failures in full', async () => {
+    const execute = jest.fn(async () => {
+      throw new Error('genuine bug');
+    });
+    const interaction = createInteraction({
+      commandName: 'spam',
+      commands: new Map([['spam', { execute }]])
+    });
+
+    await handleInteraction(interaction);
+
+    expect(console.error).toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalled();
   });
 });
 

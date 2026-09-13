@@ -32,6 +32,19 @@ function describeError(err) {
   return '❌ Something went wrong running that command.';
 }
 
+/**
+ * Discord error codes meaning the interaction can no longer be answered:
+ * 10062 the token is unknown or expired (the 3-second window lapsed, typically
+ * because the bot was restarting when the command was invoked), and 40060 it has
+ * already been acknowledged. Retrying either one just produces a second, more
+ * confusing error.
+ */
+const DEAD_INTERACTION_CODES = new Set([10062, 40060]);
+
+function isDeadInteraction(err) {
+  return DEAD_INTERACTION_CODES.has(err?.code);
+}
+
 /** Replies or edits, depending on whether the command already deferred. */
 async function respondWithError(interaction, content) {
   try {
@@ -41,6 +54,10 @@ async function respondWithError(interaction, content) {
       await interaction.reply({ content, flags: MessageFlags.Ephemeral });
     }
   } catch (err) {
+    if (isDeadInteraction(err)) {
+      console.warn('⚠️  Could not deliver an error response: the interaction is gone.');
+      return;
+    }
     console.error('Failed to deliver an error response:', err);
   }
 }
@@ -59,6 +76,16 @@ async function handleInteraction(interaction) {
   try {
     await command.execute(interaction);
   } catch (err) {
+    // A dead interaction is not a command failure -- there is nothing to report
+    // to and nothing to fix in the command, so log one line, not a stack trace.
+    if (isDeadInteraction(err)) {
+      console.warn(
+        `⚠️  /${interaction.commandName} could not be answered: the interaction expired. ` +
+          'This usually means the bot was restarting when the command was used.'
+      );
+      return;
+    }
+
     console.error(`❌ Error running /${interaction.commandName}:`, err);
     await respondWithError(interaction, describeError(err));
   }
@@ -70,7 +97,9 @@ function registerInteractionHandler(client, Events) {
 }
 
 module.exports = {
+  DEAD_INTERACTION_CODES,
   describeError,
+  isDeadInteraction,
   handleInteraction,
   registerInteractionHandler,
   respondWithError

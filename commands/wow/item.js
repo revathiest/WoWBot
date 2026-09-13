@@ -6,7 +6,7 @@ const { getItem, getItemMedia, searchItems } = require('../../utils/blizzard/gam
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { readConfig } = require('../../config');
-const { formatGold, localized, mediaAsset, qualityColor } = require('../../utils/wow');
+const { formatGold, localized, mediaAsset, qualityColor, wowheadItemUrl } = require('../../utils/wow');
 
 const MAX_MATCHES_LISTED = 10;
 
@@ -27,14 +27,14 @@ function isItemId(query) {
   return /^\d+$/.test(query.trim());
 }
 
-function buildEmbed({ item, iconUrl, locale }) {
+function buildEmbed({ item, iconUrl, locale, game = 'retail' }) {
   const quality = localized(item.quality?.name, locale);
   const name = localized(item.name, locale) ?? 'Unknown item';
 
   const embed = new EmbedBuilder()
     .setColor(qualityColor(item.quality?.type ?? quality))
     .setTitle(name)
-    .setURL(`https://www.wowhead.com/item=${item.id}`)
+    .setURL(wowheadItemUrl(item.id, game))
     .addFields(
       { name: 'Item ID', value: String(item.id), inline: true },
       { name: 'Quality', value: quality ?? '—', inline: true },
@@ -82,7 +82,7 @@ async function replyWithItem(interaction, itemId, scope, locale) {
   const item = await getItem(itemId, { region: scope.region, game: scope.game });
   const iconUrl = await loadIcon(item.id, scope);
 
-  await interaction.editReply({ embeds: [buildEmbed({ item, iconUrl, locale })] });
+  await interaction.editReply({ embeds: [buildEmbed({ item, iconUrl, locale, game: scope.game })] });
 }
 
 async function execute(interaction) {

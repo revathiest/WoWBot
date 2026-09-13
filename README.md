@@ -23,11 +23,14 @@ Every command takes an optional `region` (`US`, `EU`, `KR`, `TW`). All except `/
 
 | `game` | Namespace | What it covers |
 | --- | --- | --- |
+| `anniversary` | `dynamic-classicann-us` | **TBC Anniversary** — Dreamscythe, Nightslayer, Maladath (US); Thunderstrike, Spineshatter (EU). |
 | `retail` | `dynamic-us` | Modern WoW. |
-| `classic` | `dynamic-classic-us` | Progression Classic — **the Burning Crusade Anniversary realms** (Maladath, Skyfury, Angerforge, Faerlina, Whitemane…) alongside the other progression realms. |
+| `classic` | `dynamic-classic-us` | Classic progression, currently the Mists of Pandaria track. |
 | `classic-era` | `dynamic-classic1x-us` | Permanent vanilla, including Hardcore (Whitemane, Doomhowl, Living Flame…). |
 
-Blizzard exposes only these three. There is no per-expansion namespace — `classictbc`, `classicwlk`, `classic2x` and similar all return 403, so TBC Anniversary realms are reached through `classic`, not a namespace of their own.
+> ⚠️ **`classicann` is not in Blizzard's API documentation** and cannot be found by probing: an invalid namespace and an unauthorised one both return an identical generic `403 Forbidden`, so guessing names proves nothing. It is documented only on [Blizzard's API forum](https://us.forums.blizzard.com/en/blizzard/t/tbc-anniversary-namespaces-and-data-refreshes/57155). Never conclude a namespace is absent because it 403s.
+
+The `anniversary` static data is genuine TBC: 9 classes (no Death Knight), 10 races including Blood Elf and Draenei, and items cut off at TBC — the Warglaive of Azzinoth resolves while Shadowmourne (WotLK) 404s. There is no WoW Token, so `/token` says so rather than erroring.
 
 `/mythicplus` is Retail-only and takes no `game` option, since Mythic+ does not exist in Classic.
 

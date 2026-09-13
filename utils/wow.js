@@ -165,6 +165,21 @@ function armoryUrl({ region, realmSlug, characterName }) {
   return `https://worldofwarcraft.blizzard.com/${localePath}/character/${region}/${realmSlug}/${encodeCharacterName(characterName)}`;
 }
 
+/**
+ * Wowhead has a separate database per game version. Each path below was checked
+ * against a real item of that era.
+ */
+const WOWHEAD_PATH = {
+  retail: '',
+  anniversary: 'tbc/',
+  classic: 'mop-classic/',
+  'classic-era': 'classic/'
+};
+
+function wowheadItemUrl(itemId, game = 'retail') {
+  return `https://www.wowhead.com/${WOWHEAD_PATH[game] ?? ''}item=${itemId}`;
+}
+
 /** Pulls a named asset (avatar, inset, main-raw) out of a character-media payload. */
 function mediaAsset(media, key) {
   const assets = media?.assets;
@@ -207,5 +222,7 @@ module.exports = {
   realmMatchKey,
   slugifyRealm,
   stripDiacritics,
-  titleCase
+  titleCase,
+  wowheadItemUrl,
+  WOWHEAD_PATH
 };

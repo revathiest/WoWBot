@@ -3,6 +3,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getWowTokenPrice } = require('../../utils/blizzard/gameData');
+const { BlizzardApiError } = require('../../utils/blizzard/client');
 const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { discordTimestamp, formatGold } = require('../../utils/wow');
 
@@ -33,7 +34,19 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   const scope = resolveScope(interaction);
-  const token = await getWowTokenPrice({ region: scope.region, game: scope.game });
+
+  let token;
+  try {
+    token = await getWowTokenPrice({ region: scope.region, game: scope.game });
+  } catch (err) {
+    // TBC Anniversary has no WoW Token, and the endpoint 404s rather than
+    // returning an empty result.
+    if (err instanceof BlizzardApiError && err.isNotFound) {
+      await interaction.editReply(`❌ There is no WoW Token in ${scope.label}.`);
+      return;
+    }
+    throw err;
+  }
 
   await interaction.editReply({ embeds: [buildEmbed({ token, scopeLabel: scope.label })] });
 }

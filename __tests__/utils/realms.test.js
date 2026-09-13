@@ -23,7 +23,8 @@ const INDEX = {
     { id: 5, name: 'Aegwynn', slug: 'aegwynn' },
     { id: 6, name: 'US1A2-INST', slug: 'us1a2inst' },
     { id: 7, name: 'US2 CWOW CSI 80', slug: 'us2-cwow-csi-80' },
-    { id: 8, name: 'zzz_RDB EU', slug: 'zzzrdb-eu' }
+    { id: 8, name: 'zzz_RDB EU', slug: 'zzzrdb-eu' },
+    { id: 9, name: 'PROGWOW US1 Web', slug: 'progwow-us1-web' }
   ]
 };
 
@@ -46,6 +47,7 @@ describe('getRealms', () => {
       'Azjol-Nerub',
       "Mal'Ganis",
       'Marécage de Zangar',
+      'PROGWOW US1 Web',
       'US1A2-INST',
       'US2 CWOW CSI 80',
       'zzz_RDB EU'
@@ -56,7 +58,8 @@ describe('getRealms', () => {
     const realms = await getRealms({ region: 'us', game: 'retail' });
     const internal = realms.filter(r => r.internal).map(r => r.name);
 
-    expect(internal).toEqual(['US1A2-INST', 'US2 CWOW CSI 80', 'zzz_RDB EU']);
+    // PROGWOW entries appear on the Anniversary namespace and are not playable.
+    expect(internal).toEqual(['PROGWOW US1 Web', 'US1A2-INST', 'US2 CWOW CSI 80', 'zzz_RDB EU']);
   });
 
   it('caches per region and game', async () => {

@@ -11,8 +11,9 @@ const { DEFAULT_GAME, DEFAULT_REGION } = require('../../config');
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 // Internal/test realms Blizzard leaves in the index. They are not playable and
-// only add noise to listings: "US1A2-INST", "US2 CWOW CSI 80", "zzz_RDB EU".
-const INTERNAL_REALM = /(-INST\b|\bINST\b|^(?:US|EU|KR|TW|AU)\d|\bCWOW\b|\bVANWOW\b|\bGMSS\b|\bCSI\b|^zzz|\bPTR\b|\bTest\b)/i;
+// only add noise to listings: "US1A2-INST", "US2 CWOW CSI 80", "zzz_RDB EU",
+// and "PROGWOW US1 Web" on the Anniversary namespace.
+const INTERNAL_REALM = /(-INST\b|\bINST\b|^(?:US|EU|KR|TW|AU)\d|\bCWOW\b|\bVANWOW\b|\bPROGWOW\b|\bGMSS\b|\bCSI\b|^zzz|\bPTR\b|\bTest\b)/i;
 
 const cache = new Map(); // `${region}:${game}` -> { expiresAt, realms }
 

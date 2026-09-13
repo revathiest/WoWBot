@@ -11,13 +11,22 @@ const DEFAULT_LOCALE = 'en_US';
  * Verified by probing: only these exist — `classic2x`, `classictbc`, `classicwlk`
  * and similar all return 403.
  *
- *   retail       -> profile-us          (modern WoW)
- *   classic      -> profile-classic-us  (progression Classic, incl. Burning
- *                                        Crusade Anniversary realms like Maladath)
- *   classic-era  -> profile-classic1x-us (permanent vanilla, incl. Hardcore)
+ *   retail       -> profile-us            (modern WoW)
+ *   anniversary  -> profile-classicann-us (TBC Anniversary: Dreamscythe,
+ *                                          Nightslayer, Maladath, Thunderstrike,
+ *                                          Spineshatter)
+ *   classic      -> profile-classic-us    (progression Classic, currently the
+ *                                          Mists of Pandaria track)
+ *   classic-era  -> profile-classic1x-us  (permanent vanilla, incl. Hardcore)
+ *
+ * `classicann` is undocumented in the API reference and was not discoverable by
+ * probing — an invalid namespace and an unauthorised one both return an identical
+ * generic 403. It came from Blizzard's own API forum. Do not assume a namespace
+ * is absent because it 403s.
  */
 const GAMES = {
   retail: { label: 'Retail', infix: null },
+  anniversary: { label: 'TBC Anniversary', infix: 'classicann' },
   classic: { label: 'Classic', infix: 'classic' },
   'classic-era': { label: 'Classic Era', infix: 'classic1x' }
 };

@@ -159,6 +159,23 @@ describe('armoryUrl', () => {
   });
 });
 
+describe('wowheadItemUrl', () => {
+  // Each path was checked against a real item of that era.
+  it.each([
+    ['anniversary', 'https://www.wowhead.com/tbc/item=32837'],
+    ['classic-era', 'https://www.wowhead.com/classic/item=32837'],
+    ['classic', 'https://www.wowhead.com/mop-classic/item=32837'],
+    ['retail', 'https://www.wowhead.com/item=32837']
+  ])('links %s items to the right database', (game, expected) => {
+    expect(wow.wowheadItemUrl(32837, game)).toBe(expected);
+  });
+
+  it('defaults to retail for an unknown game', () => {
+    expect(wow.wowheadItemUrl(1)).toBe('https://www.wowhead.com/item=1');
+    expect(wow.wowheadItemUrl(1, 'nonsense')).toBe('https://www.wowhead.com/item=1');
+  });
+});
+
 describe('mediaAsset', () => {
   const media = {
     assets: [

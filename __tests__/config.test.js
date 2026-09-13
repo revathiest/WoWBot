@@ -84,7 +84,7 @@ describe('normalizeGame', () => {
   it('rejects expansions that are not separate namespaces', () => {
     // Blizzard exposes only retail, classic, and classic1x -- there is no
     // per-expansion namespace, verified by probing (everything else 403s).
-    ['tbc', 'wrath', 'cata', 'mop', 'classic2x', ''].forEach(value => {
+    ['tbc', 'wrath', 'cata', 'mop', 'classic2x', 'classicann', ''].forEach(value => {
       expect(normalizeGame(value)).toBeNull();
     });
   });
@@ -100,6 +100,13 @@ describe('buildNamespace', () => {
     expect(buildNamespace('dynamic', 'classic', 'us')).toBe('dynamic-classic-us');
     expect(buildNamespace('static', 'classic-era', 'us')).toBe('static-classic1x-us');
     expect(buildNamespace('profile', 'classic', 'eu')).toBe('profile-classic-eu');
+  });
+
+  it('maps TBC Anniversary to the classicann namespace', () => {
+    // Verified live: dynamic-classicann-us lists Dreamscythe, Nightslayer, Maladath.
+    expect(buildNamespace('dynamic', 'anniversary', 'us')).toBe('dynamic-classicann-us');
+    expect(buildNamespace('static', 'anniversary', 'us')).toBe('static-classicann-us');
+    expect(buildNamespace('profile', 'anniversary', 'eu')).toBe('profile-classicann-eu');
   });
 });
 

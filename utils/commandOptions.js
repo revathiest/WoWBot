@@ -6,8 +6,9 @@ const { readConfig, normalizeRegion, normalizeGame, GAMES } = require('../config
 const { REGION_CHOICES } = require('./wow');
 
 const GAME_CHOICES = [
+  { name: 'TBC Anniversary (Nightslayer, Dreamscythe, Maladath)', value: 'anniversary' },
   { name: 'Retail', value: 'retail' },
-  { name: 'Classic (Anniversary / Burning Crusade)', value: 'classic' },
+  { name: 'Classic progression (currently Mists of Pandaria)', value: 'classic' },
   { name: 'Classic Era (incl. Hardcore)', value: 'classic-era' }
 ];
 

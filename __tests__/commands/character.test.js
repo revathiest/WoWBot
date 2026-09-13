@@ -5,6 +5,7 @@ jest.mock('../../utils/blizzard/profile', () => ({
 
 // The realm resolver reads the live realm index; stub it so tests stay offline.
 jest.mock('../../utils/blizzard/realms', () => ({
+  findRealmGames: jest.fn(async () => []),
   resolveRealm: jest.fn(async query => ({
     slug: String(query).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ +/g, '-'),
     name: query,
@@ -13,7 +14,7 @@ jest.mock('../../utils/blizzard/realms', () => ({
 }));
 
 const { getCharacterProfile, getCharacterMedia } = require('../../utils/blizzard/profile');
-const { resolveRealm } = require('../../utils/blizzard/realms');
+const { resolveRealm, findRealmGames } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/character');
 const { createInteraction, field, replyEmbed, replyPayload } = require('../helpers/interaction');
@@ -58,6 +59,7 @@ beforeEach(() => {
     name: query,
     resolved: true
   }));
+  findRealmGames.mockResolvedValue([]);
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -142,6 +144,31 @@ describe('/character execute', () => {
     expect(payload).toContain('Nobody');
     expect(payload).toContain('malganis');
     expect(getCharacterMedia).not.toHaveBeenCalled();
+  });
+
+  it('points at the right game version when the realm is in another one', async () => {
+    // The commonest mistake: correct realm, wrong game version.
+    resolveRealm.mockResolvedValue({ slug: 'nightslayer', name: 'Nightslayer', resolved: false });
+    getCharacterProfile.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
+    findRealmGames.mockResolvedValue([
+      { game: 'anniversary', label: 'TBC Anniversary', realm: { slug: 'nightslayer' } }
+    ]);
+
+    const target = interaction({ character: 'Mindbugger', realm: 'Nightslayer' });
+    await command.execute(target);
+
+    const payload = replyPayload(target);
+    expect(payload).toContain('is not a US realm');
+    expect(payload).toContain('game:TBC Anniversary');
+    expect(payload).toContain('Mindbugger');
+  });
+
+  it('does not suggest another version when the realm resolved fine', async () => {
+    getCharacterProfile.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
+
+    await command.execute(interaction({ character: 'Nobody' }));
+
+    expect(findRealmGames).not.toHaveBeenCalled();
   });
 
   it('rethrows non-404 failures for the interaction handler', async () => {

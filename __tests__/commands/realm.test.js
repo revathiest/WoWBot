@@ -6,12 +6,13 @@ jest.mock('../../utils/blizzard/gameData', () => ({
 
 jest.mock('../../utils/blizzard/realms', () => ({
   resolveRealm: jest.fn(),
+  findRealmGames: jest.fn(async () => []),
   getPlayableRealms: jest.fn(async () => []),
   searchRealms: jest.requireActual('../../utils/blizzard/realms').searchRealms
 }));
 
 const { getRealm, getConnectedRealm } = require('../../utils/blizzard/gameData');
-const { resolveRealm, getPlayableRealms } = require('../../utils/blizzard/realms');
+const { resolveRealm, getPlayableRealms, findRealmGames } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/realm');
 const { createInteraction, field, replyEmbed, replyPayload } = require('../helpers/interaction');
@@ -51,6 +52,7 @@ beforeEach(() => {
     resolved: true
   }));
   getPlayableRealms.mockResolvedValue([]);
+  findRealmGames.mockResolvedValue([]);
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -138,6 +140,18 @@ describe('/realm', () => {
     await command.execute(target);
 
     expect(replyPayload(target)).not.toContain('Did you mean');
+  });
+
+  it('names the game version that actually has the realm', async () => {
+    getRealm.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
+    findRealmGames.mockResolvedValue([
+      { game: 'anniversary', label: 'TBC Anniversary', realm: { slug: 'nightslayer' } }
+    ]);
+
+    const target = interaction({ realm: 'Nightslayer' });
+    await command.execute(target);
+
+    expect(replyPayload(target)).toContain('game:TBC Anniversary');
   });
 
   it('rethrows failures that are not a missing realm', async () => {

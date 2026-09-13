@@ -3,7 +3,12 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getRealm, getConnectedRealm } = require('../../utils/blizzard/gameData');
-const { getPlayableRealms, resolveRealm, searchRealms } = require('../../utils/blizzard/realms');
+const {
+  findRealmGames,
+  getPlayableRealms,
+  resolveRealm,
+  searchRealms
+} = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { idFromHref } = require('../../utils/wow');
@@ -85,6 +90,20 @@ async function execute(interaction) {
     realm = await getRealm(target.slug, { region: scope.region, game: scope.game });
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
+      // Most often the realm exists, just in another game version.
+      const elsewhere = await findRealmGames(realmName, {
+        region: scope.region,
+        exclude: scope.game
+      });
+
+      if (elsewhere.length > 0) {
+        const options = elsewhere.map(match => `\`game:${match.label}\``).join(' or ');
+        await interaction.editReply(
+          `❌ **${realmName}** is not a ${scope.label} realm — it is on ${options}.`
+        );
+        return;
+      }
+
       const suggestions = await suggestRealms(realmName, scope);
       const hint = suggestions.length > 0 ? `\nDid you mean: ${suggestions.join(', ')}?` : '';
 

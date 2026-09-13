@@ -4,7 +4,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getCharacterProfile, getCharacterMedia } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const { resolveRealm } = require('../../utils/blizzard/realms');
+const { findRealmGames, resolveRealm } = require('../../utils/blizzard/realms');
 const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const {
   armoryUrl,
@@ -101,14 +101,25 @@ async function execute(interaction) {
     profile = await getCharacterProfile(realmSlug, characterName, { region, game });
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
-      const classicNote = game === 'retail'
-        ? 'Characters below level 10 and recently renamed characters may not appear.'
-        : 'Note that Blizzard\'s character profile data is thin or absent for Classic — ' +
-          'this may not be a spelling problem.';
+      // The usual cause is the right realm in the wrong game version, so look the
+      // realm up elsewhere and say exactly which option to pass.
+      if (!target.resolved) {
+        const elsewhere = await findRealmGames(realm, { region, exclude: game });
+
+        if (elsewhere.length > 0) {
+          const options = elsewhere.map(match => `\`game:${match.label}\``).join(' or ');
+          await interaction.editReply(
+            `❌ **${realm}** is not a ${scope.label} realm — it is on ${options}.\n` +
+              `Run the command again with that \`game\` option to look up **${characterName}**.`
+          );
+          return;
+        }
+      }
 
       await interaction.editReply(
         `❌ No character named **${characterName}** on **${realm}** (${scope.label}).\n` +
-          `Checked realm slug \`${realmSlug}\`${target.resolved ? '' : ' (guessed — realm not found in the index)'}. ${classicNote}`
+          `Checked realm slug \`${realmSlug}\`. Characters below level 10 and recently ` +
+          'renamed characters may not appear.'
       );
       return;
     }

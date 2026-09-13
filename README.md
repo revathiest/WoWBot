@@ -34,7 +34,9 @@ The `anniversary` static data is genuine TBC: 9 classes (no Death Knight), 10 ra
 
 `/mythicplus` is Retail-only and takes no `game` option, since Mythic+ does not exist in Classic.
 
-> **Classic caveat:** Game Data (realms, status, population, items, token) is fully available for Classic. Blizzard's **character profile** data for Classic is thin to non-existent, so `/character` may return "not found" for a character that plainly exists.
+**Character profiles work on TBC Anniversary** — verified against live characters on Nightslayer (level 70, class, race, guild, item level, avatar). The catch is that the realm must be looked up in the right game version: a realm found in another version produces a message naming the `game` option to use, rather than a bare "not found".
+
+Set `BLIZZARD_GAME` to the version your guild plays so nobody has to pass the option.
 
 > **Note on `/item`:** Blizzard's item search matches full names only — there is no substring or fuzzy search in the API. `Thunderfury` will not find `Thunderfury, Blessed Blade of the Windseeker`; pass the exact name or the item ID.
 

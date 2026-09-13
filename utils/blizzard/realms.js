@@ -5,7 +5,7 @@
 
 const { getRealmIndex } = require('./gameData');
 const { realmMatchKey, slugifyRealm } = require('../wow');
-const { DEFAULT_GAME, DEFAULT_REGION } = require('../../config');
+const { DEFAULT_GAME, DEFAULT_REGION, GAMES } = require('../../config');
 
 // The realm list changes only when Blizzard adds or renames realms.
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -99,8 +99,31 @@ async function resolveRealm(query, options = {}) {
   return { slug: slugifyRealm(query), name: String(query ?? ''), resolved: false };
 }
 
+/**
+ * Finds which other game versions contain a realm. Used to turn "realm not found"
+ * into "that realm is on TBC Anniversary — pass game:anniversary", which is by far
+ * the most common mistake: the realm exists, just not in the version being searched.
+ */
+async function findRealmGames(query, { region = DEFAULT_REGION, exclude = null } = {}) {
+  const matches = [];
+
+  for (const game of Object.keys(GAMES)) {
+    if (game === exclude) continue;
+
+    try {
+      const realm = findRealm(await getRealms({ region, game }), query);
+      if (realm) matches.push({ game, label: GAMES[game].label, realm });
+    } catch {
+      // A version whose index cannot be read simply contributes no suggestion.
+    }
+  }
+
+  return matches;
+}
+
 module.exports = {
   CACHE_TTL_MS,
+  findRealmGames,
   INTERNAL_REALM,
   clearRealmCache,
   findRealm,

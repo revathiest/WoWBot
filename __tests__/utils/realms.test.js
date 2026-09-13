@@ -6,6 +6,7 @@ const { getRealmIndex } = require('../../utils/blizzard/gameData');
 const {
   CACHE_TTL_MS,
   clearRealmCache,
+  findRealmGames,
   findRealm,
   getPlayableRealms,
   getRealms,
@@ -150,6 +151,44 @@ describe('searchRealms', () => {
 
   it('returns everything for an empty query', () => {
     expect(searchRealms(realms, '')).toHaveLength(realms.length);
+  });
+});
+
+describe('findRealmGames', () => {
+  it('reports which game versions contain a realm', async () => {
+    // Nightslayer exists only on the Anniversary namespace.
+    getRealmIndex.mockImplementation(async ({ game }) =>
+      game === 'anniversary'
+        ? { realms: [{ id: 6065, name: 'Nightslayer', slug: 'nightslayer' }] }
+        : INDEX
+    );
+
+    const matches = await findRealmGames('Nightslayer', { region: 'us' });
+
+    expect(matches.map(m => m.game)).toEqual(['anniversary']);
+    expect(matches[0].label).toBe('TBC Anniversary');
+    expect(matches[0].realm.slug).toBe('nightslayer');
+  });
+
+  it('skips the version already being searched', async () => {
+    const matches = await findRealmGames('Area 52', { region: 'us', exclude: 'retail' });
+
+    expect(matches.some(m => m.game === 'retail')).toBe(false);
+  });
+
+  it('returns nothing for a realm that exists nowhere', async () => {
+    expect(await findRealmGames('Nonsense', { region: 'us' })).toEqual([]);
+  });
+
+  it('ignores versions whose index cannot be read', async () => {
+    getRealmIndex.mockImplementation(async ({ game }) => {
+      if (game === 'retail') return INDEX;
+      throw new Error('API down');
+    });
+
+    const matches = await findRealmGames('Area 52', { region: 'us' });
+
+    expect(matches.map(m => m.game)).toEqual(['retail']);
   });
 });
 

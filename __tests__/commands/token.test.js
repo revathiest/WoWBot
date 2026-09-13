@@ -15,11 +15,14 @@ beforeEach(() => {
 });
 
 describe('/token', () => {
-  it('takes only an optional region', () => {
+  it('takes optional game and region', () => {
     const json = command.data.toJSON();
 
     expect(json.name).toBe('token');
-    expect(json.options.map(option => [option.name, option.required])).toEqual([['region', false]]);
+    expect(json.options.map(option => [option.name, option.required])).toEqual([
+      ['game', false],
+      ['region', false]
+    ]);
   });
 
   it('reports the price in gold with an update time', async () => {
@@ -38,12 +41,12 @@ describe('/token', () => {
 
     await command.execute(interaction);
 
-    expect(getWowTokenPrice).toHaveBeenCalledWith({ region: 'kr' });
+    expect(getWowTokenPrice).toHaveBeenCalledWith({ region: 'kr', game: 'retail' });
     expect(replyEmbed(interaction).title).toBe('WoW Token — KR');
   });
 
   it('omits the update time when the API does not send one', () => {
-    const embed = command.buildEmbed({ token: { price: 100 }, region: 'us' }).toJSON();
+    const embed = command.buildEmbed({ token: { price: 100 }, scopeLabel: 'US' }).toJSON();
 
     expect(field(embed, 'Updated')).toBeUndefined();
     expect(field(embed, 'Price').value).toBe('1s');

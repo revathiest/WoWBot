@@ -1,15 +1,25 @@
 const wow = require('../../utils/wow');
 
 describe('slugifyRealm', () => {
+  // Every expectation below is a real name -> real slug pair taken from the live
+  // realm index. The rule was validated against all 801 realms in us/eu/kr/tw.
   it.each([
+    // Only spaces become hyphens.
     ['Area 52', 'area-52'],
-    ['Mal’Ganis', 'malganis'],
-    ["Kil'jaeden", 'kiljaeden'],
-    ['Azjol-Nerub', 'azjol-nerub'],
-    ['Éonar', 'eonar'],
     ['Conseil des Ombres', 'conseil-des-ombres'],
     ['  Burning Blade  ', 'burning-blade'],
-    ['AREA-52', 'area-52']
+    // Apostrophes and hyphens are DELETED, not turned into separators.
+    ['Mal’Ganis', 'malganis'],
+    ["Kil'jaeden", 'kiljaeden'],
+    ['Azjol-Nerub', 'azjolnerub'],
+    ['Arak-arahm', 'arakarahm'],
+    ["Lightning's Blade", 'lightnings-blade'],
+    ['zzz_RDB EU', 'zzzrdb-eu'],
+    // Accents are PRESERVED, not folded to ASCII.
+    ['Festung der Stürme', 'festung-der-stürme'],
+    ['Marécage de Zangar', 'marécage-de-zangar'],
+    ['La Croisade écarlate', 'la-croisade-écarlate'],
+    ['Aggra (Português)', 'aggra-português']
   ])('turns %s into %s', (input, expected) => {
     expect(wow.slugifyRealm(input)).toBe(expected);
   });
@@ -17,6 +27,24 @@ describe('slugifyRealm', () => {
   it('handles empty input without throwing', () => {
     expect(wow.slugifyRealm(undefined)).toBe('');
     expect(wow.slugifyRealm('')).toBe('');
+  });
+});
+
+describe('realmMatchKey', () => {
+  it('collapses the ways a person might type one realm', () => {
+    const expected = wow.realmMatchKey('Azjol-Nerub');
+
+    ['azjol nerub', 'AZJOLNERUB', 'azjol-nerub', "Azjol'Nerub"].forEach(variant => {
+      expect(wow.realmMatchKey(variant)).toBe(expected);
+    });
+  });
+
+  it('folds accents so ASCII input still matches', () => {
+    expect(wow.realmMatchKey('Marécage de Zangar')).toBe(wow.realmMatchKey('Marecage de Zangar'));
+  });
+
+  it('is empty for empty input', () => {
+    expect(wow.realmMatchKey(undefined)).toBe('');
   });
 });
 

@@ -34,7 +34,9 @@ Keep these boundaries — the tests rely on them for mocking:
 ## Blizzard API gotchas
 
 - Namespaces are mandatory: `profile-{region}` for characters, `dynamic-{region}` for realms and the token, `static-{region}` for items.
-- Realm names in paths must be slugs, and character names must be lowercased — use `slugifyRealm` and `encodeCharacterName` rather than hand-rolling.
+- Namespaces also carry the game version: `dynamic-classic-us`, `profile-classic1x-us`. Build them with `buildNamespace` from `config/`; never concatenate by hand. Only `retail`, `classic`, and `classic1x` exist — there is no per-expansion namespace.
+- **Never derive a realm slug when you can resolve one.** Use `resolveRealm` from `utils/blizzard/realms.js`, which matches against the live index. Blizzard deletes hyphens and apostrophes (`Azjol-Nerub` → `azjolnerub`) but keeps accents (`festung-der-stürme`), so the naive transformation is wrong for roughly a quarter of realms. `slugifyRealm` implements the verified rule and exists as the offline fallback.
+- Character names must be lowercased in paths — use `encodeCharacterName`.
 - Search endpoints return **localized maps** (`{ en_US: "..." }`) while direct document fetches return plain strings. Run anything user-visible through `localized()`.
 - Realm status and population live on the **connected realm**, not the realm document.
 - Mythic+ ratings are RGB component objects, not integers; `ratingColor()` packs them.

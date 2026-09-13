@@ -4,14 +4,14 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getCharacterProfile, getCharacterMedia } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const { addRegionOption, resolveRegion } = require('../../utils/commandOptions');
+const { resolveRealm } = require('../../utils/blizzard/realms');
+const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const {
   armoryUrl,
   classColor,
   discordTimestamp,
   formatNumber,
-  mediaAsset,
-  slugifyRealm
+  mediaAsset
 } = require('../../utils/wow');
 
 const data = new SlashCommandBuilder()
@@ -30,16 +30,17 @@ const data = new SlashCommandBuilder()
       .setRequired(true)
   );
 
+addGameOption(data);
 addRegionOption(data);
 
-function buildEmbed({ profile, media, region, realmSlug, characterName }) {
+function buildEmbed({ profile, media, region, realmSlug, characterName, scopeLabel }) {
   const specName = profile.active_spec?.name;
   const className = profile.character_class?.name;
   const specAndClass = [specName, className].filter(Boolean).join(' ') || 'Unknown';
 
   const embed = new EmbedBuilder()
     .setColor(classColor(className))
-    .setTitle(`${profile.name} — ${profile.realm?.name ?? realmSlug} (${region.toUpperCase()})`)
+    .setTitle(`${profile.name} — ${profile.realm?.name ?? realmSlug} (${scopeLabel ?? region.toUpperCase()})`)
     .setURL(armoryUrl({ region, realmSlug, characterName }))
     .addFields(
       { name: 'Level', value: String(profile.level ?? '—'), inline: true },
@@ -89,17 +90,25 @@ async function execute(interaction) {
 
   const characterName = interaction.options.getString('character');
   const realm = interaction.options.getString('realm');
-  const region = resolveRegion(interaction);
-  const realmSlug = slugifyRealm(realm);
+  const scope = resolveScope(interaction);
+  const { region, game } = scope;
+
+  const target = await resolveRealm(realm, { region, game });
+  const realmSlug = target.slug;
 
   let profile;
   try {
-    profile = await getCharacterProfile(realm, characterName, { region });
+    profile = await getCharacterProfile(realmSlug, characterName, { region, game });
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
+      const classicNote = game === 'retail'
+        ? 'Characters below level 10 and recently renamed characters may not appear.'
+        : 'Note that Blizzard\'s character profile data is thin or absent for Classic — ' +
+          'this may not be a spelling problem.';
+
       await interaction.editReply(
-        `❌ No character named **${characterName}** on **${realm}** (${region.toUpperCase()}).\n` +
-          `Checked realm slug \`${realmSlug}\`. Characters below level 10 and recently renamed characters may not appear.`
+        `❌ No character named **${characterName}** on **${realm}** (${scope.label}).\n` +
+          `Checked realm slug \`${realmSlug}\`${target.resolved ? '' : ' (guessed — realm not found in the index)'}. ${classicNote}`
       );
       return;
     }
@@ -109,13 +118,15 @@ async function execute(interaction) {
   // Artwork is a nicety; a failure here should not sink the whole reply.
   let media = null;
   try {
-    media = await getCharacterMedia(realm, characterName, { region });
+    media = await getCharacterMedia(realmSlug, characterName, { region, game });
   } catch (err) {
     console.warn(`Could not load character media for ${characterName}-${realmSlug}: ${err.message}`);
   }
 
   await interaction.editReply({
-    embeds: [buildEmbed({ profile, media, region, realmSlug, characterName })]
+    embeds: [
+      buildEmbed({ profile, media, region, realmSlug, characterName, scopeLabel: scope.label })
+    ]
   });
 }
 

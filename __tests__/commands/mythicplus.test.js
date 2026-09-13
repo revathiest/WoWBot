@@ -3,6 +3,14 @@ jest.mock('../../utils/blizzard/profile', () => ({
   getMythicKeystoneSeason: jest.fn()
 }));
 
+jest.mock('../../utils/blizzard/realms', () => ({
+  resolveRealm: jest.fn(async query => ({
+    slug: String(query).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ +/g, '-'),
+    name: query,
+    resolved: true
+  }))
+}));
+
 const {
   getMythicKeystoneProfile,
   getMythicKeystoneSeason
@@ -94,10 +102,10 @@ describe('/mythicplus execute', () => {
     await command.execute(target);
 
     expect(getMythicKeystoneSeason).toHaveBeenCalledWith(
-      'Area 52',
+      'area-52',
       'Thrall',
       14,
-      expect.objectContaining({ region: 'us' })
+      expect.objectContaining({ region: 'us', game: 'retail' })
     );
 
     const embed = replyEmbed(target);
@@ -120,7 +128,7 @@ describe('/mythicplus execute', () => {
     await command.execute(interaction());
 
     expect(getMythicKeystoneSeason).toHaveBeenCalledWith(
-      'Area 52',
+      'area-52',
       'Thrall',
       18,
       expect.anything()
@@ -136,7 +144,7 @@ describe('/mythicplus execute', () => {
     await command.execute(interaction());
 
     expect(getMythicKeystoneSeason).toHaveBeenCalledWith(
-      'Area 52',
+      'area-52',
       'Thrall',
       9,
       expect.anything()

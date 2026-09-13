@@ -2,10 +2,11 @@
 // /realm — realm status, population, and connected-realm roster.
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getRealm, getConnectedRealm, getRealmIndex } = require('../../utils/blizzard/gameData');
+const { getRealm, getConnectedRealm } = require('../../utils/blizzard/gameData');
+const { getPlayableRealms, resolveRealm, searchRealms } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const { addRegionOption, resolveRegion } = require('../../utils/commandOptions');
-const { idFromHref, slugifyRealm } = require('../../utils/wow');
+const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
+const { idFromHref } = require('../../utils/wow');
 
 const UP_COLOR = 0x43b581;
 const DOWN_COLOR = 0xf04747;
@@ -21,14 +22,15 @@ const data = new SlashCommandBuilder()
       .setRequired(true)
   );
 
+addGameOption(data);
 addRegionOption(data);
 
-function buildEmbed({ realm, connectedRealm, region }) {
+function buildEmbed({ realm, connectedRealm, scope }) {
   const isUp = connectedRealm?.status?.type === 'UP';
 
   const embed = new EmbedBuilder()
     .setColor(connectedRealm ? (isUp ? UP_COLOR : DOWN_COLOR) : UP_COLOR)
-    .setTitle(`${realm.name} (${region.toUpperCase()})`)
+    .setTitle(`${realm.name} (${scope.label})`)
     .addFields(
       { name: 'Type', value: realm.type?.name ?? '—', inline: true },
       { name: 'Category', value: realm.category ?? '—', inline: true },
@@ -59,15 +61,10 @@ function buildEmbed({ realm, connectedRealm, region }) {
 }
 
 /** On a miss, offer realms whose name or slug contains what the user typed. */
-async function suggestRealms(query, region) {
+async function suggestRealms(query, scope) {
   try {
-    const index = await getRealmIndex({ region });
-    const needle = slugifyRealm(query);
-
-    return (index.realms ?? [])
-      .filter(realm => String(realm.slug ?? '').includes(needle) || needle.includes(String(realm.slug ?? '')))
-      .slice(0, MAX_SUGGESTIONS)
-      .map(realm => realm.name);
+    const realms = await getPlayableRealms({ region: scope.region, game: scope.game });
+    return searchRealms(realms, query).slice(0, MAX_SUGGESTIONS).map(realm => realm.name);
   } catch (err) {
     console.warn(`Could not load the realm index for suggestions: ${err.message}`);
     return [];
@@ -78,18 +75,21 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   const realmName = interaction.options.getString('realm');
-  const region = resolveRegion(interaction);
+  const scope = resolveScope(interaction);
+
+  // Resolve against the real realm list rather than guessing the slug.
+  const target = await resolveRealm(realmName, { region: scope.region, game: scope.game });
 
   let realm;
   try {
-    realm = await getRealm(realmName, { region });
+    realm = await getRealm(target.slug, { region: scope.region, game: scope.game });
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
-      const suggestions = await suggestRealms(realmName, region);
+      const suggestions = await suggestRealms(realmName, scope);
       const hint = suggestions.length > 0 ? `\nDid you mean: ${suggestions.join(', ')}?` : '';
 
       await interaction.editReply(
-        `❌ No realm called **${realmName}** in ${region.toUpperCase()} (looked for \`${slugifyRealm(realmName)}\`).${hint}`
+        `❌ No realm called **${realmName}** in ${scope.label} (looked for \`${target.slug}\`).${hint}`
       );
       return;
     }
@@ -102,13 +102,16 @@ async function execute(interaction) {
 
   if (connectedRealmId) {
     try {
-      connectedRealm = await getConnectedRealm(connectedRealmId, { region });
+      connectedRealm = await getConnectedRealm(connectedRealmId, {
+        region: scope.region,
+        game: scope.game
+      });
     } catch (err) {
       console.warn(`Could not load connected realm ${connectedRealmId}: ${err.message}`);
     }
   }
 
-  await interaction.editReply({ embeds: [buildEmbed({ realm, connectedRealm, region })] });
+  await interaction.editReply({ embeds: [buildEmbed({ realm, connectedRealm, scope })] });
 }
 
 module.exports = {

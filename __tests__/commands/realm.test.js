@@ -4,7 +4,14 @@ jest.mock('../../utils/blizzard/gameData', () => ({
   getRealmIndex: jest.fn()
 }));
 
-const { getRealm, getConnectedRealm, getRealmIndex } = require('../../utils/blizzard/gameData');
+jest.mock('../../utils/blizzard/realms', () => ({
+  resolveRealm: jest.fn(),
+  getPlayableRealms: jest.fn(async () => []),
+  searchRealms: jest.requireActual('../../utils/blizzard/realms').searchRealms
+}));
+
+const { getRealm, getConnectedRealm } = require('../../utils/blizzard/gameData');
+const { resolveRealm, getPlayableRealms } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/realm');
 const { createInteraction, field, replyEmbed, replyPayload } = require('../helpers/interaction');
@@ -38,16 +45,23 @@ beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   getRealm.mockResolvedValue(REALM);
   getConnectedRealm.mockResolvedValue(CONNECTED);
+  resolveRealm.mockImplementation(async query => ({
+    slug: String(query).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ +/g, '-'),
+    name: query,
+    resolved: true
+  }));
+  getPlayableRealms.mockResolvedValue([]);
 });
 
 afterEach(() => jest.restoreAllMocks());
 
 describe('/realm', () => {
-  it('requires a realm and takes an optional region', () => {
+  it('requires a realm and takes optional game and region', () => {
     const json = command.data.toJSON();
 
     expect(json.options.map(option => [option.name, option.required])).toEqual([
       ['realm', true],
+      ['game', false],
       ['region', false]
     ]);
   });
@@ -57,7 +71,7 @@ describe('/realm', () => {
 
     await command.execute(target);
 
-    expect(getConnectedRealm).toHaveBeenCalledWith(3676, { region: 'us' });
+    expect(getConnectedRealm).toHaveBeenCalledWith(3676, { region: 'us', game: 'retail' });
 
     const embed = replyEmbed(target);
     expect(embed.title).toBe('Area 52 (US)');
@@ -73,7 +87,7 @@ describe('/realm', () => {
       .buildEmbed({
         realm: REALM,
         connectedRealm: { ...CONNECTED, status: { type: 'DOWN', name: 'Down' }, has_queue: true },
-        region: 'us'
+        scope: { region: 'us', game: 'retail', label: 'US' }
       })
       .toJSON();
 
@@ -103,12 +117,10 @@ describe('/realm', () => {
 
   it('suggests near matches when the realm is unknown', async () => {
     getRealm.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
-    getRealmIndex.mockResolvedValue({
-      realms: [
-        { name: 'Area 52', slug: 'area-52' },
-        { name: 'Argent Dawn', slug: 'argent-dawn' }
-      ]
-    });
+    getPlayableRealms.mockResolvedValue([
+      { name: 'Area 52', slug: 'area-52' },
+      { name: 'Argent Dawn', slug: 'argent-dawn' }
+    ]);
     const target = interaction({ realm: 'Area' });
 
     await command.execute(target);
@@ -120,7 +132,7 @@ describe('/realm', () => {
 
   it('omits suggestions when the index cannot be read', async () => {
     getRealm.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
-    getRealmIndex.mockRejectedValue(new Error('index down'));
+    getPlayableRealms.mockRejectedValue(new Error('index down'));
     const target = interaction({ realm: 'Nonsense' });
 
     await command.execute(target);
@@ -136,7 +148,7 @@ describe('/realm', () => {
 
   it('hides the connected-realm list for a standalone realm', () => {
     const embed = command
-      .buildEmbed({ realm: REALM, connectedRealm: { ...CONNECTED, realms: [{ name: 'Area 52' }] }, region: 'us' })
+      .buildEmbed({ realm: REALM, connectedRealm: { ...CONNECTED, realms: [{ name: 'Area 52' }] }, scope: { region: 'us', game: 'retail', label: 'US' } })
       .toJSON();
 
     expect(field(embed, 'Connected Realms')).toBeUndefined();

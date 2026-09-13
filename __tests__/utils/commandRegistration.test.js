@@ -30,6 +30,7 @@ describe('loadCommandsRecursively', () => {
       'item',
       'mythicplus',
       'realm',
+      'realms',
       'token'
     ]);
   });

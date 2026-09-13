@@ -7,19 +7,15 @@ const {
   getMythicKeystoneSeason
 } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
+const { resolveRealm } = require('../../utils/blizzard/realms');
 const { addRegionOption, resolveRegion } = require('../../utils/commandOptions');
-const {
-  armoryUrl,
-  discordTimestamp,
-  formatDuration,
-  slugifyRealm
-} = require('../../utils/wow');
+const { armoryUrl, discordTimestamp, formatDuration } = require('../../utils/wow');
 
 const MAX_RUNS_SHOWN = 8;
 
 const data = new SlashCommandBuilder()
   .setName('mythicplus')
-  .setDescription('Show a character\'s Mythic+ rating and best keystone runs.')
+  .setDescription('Show a character\'s Mythic+ rating and best keystone runs (Retail only).')
   .addStringOption(option =>
     option
       .setName('character')
@@ -103,11 +99,14 @@ async function execute(interaction) {
   const characterName = interaction.options.getString('character');
   const realm = interaction.options.getString('realm');
   const region = resolveRegion(interaction);
-  const realmSlug = slugifyRealm(realm);
+
+  // Mythic+ exists only in Retail, so this command never switches game version.
+  const game = 'retail';
+  const realmSlug = (await resolveRealm(realm, { region, game })).slug;
 
   let profile;
   try {
-    profile = await getMythicKeystoneProfile(realm, characterName, { region });
+    profile = await getMythicKeystoneProfile(realmSlug, characterName, { region, game });
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
       await interaction.editReply(
@@ -132,7 +131,10 @@ async function execute(interaction) {
 
   if (latestSeasonId) {
     try {
-      const season = await getMythicKeystoneSeason(realm, characterName, latestSeasonId, { region });
+      const season = await getMythicKeystoneSeason(realmSlug, characterName, latestSeasonId, {
+        region,
+        game
+      });
       runs = season.best_runs ?? runs;
       rating = season.mythic_rating ?? rating;
     } catch (err) {

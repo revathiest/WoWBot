@@ -4,7 +4,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getItem, getItemMedia, searchItems } = require('../../utils/blizzard/gameData');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const { addRegionOption, resolveRegion } = require('../../utils/commandOptions');
+const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { readConfig } = require('../../config');
 const { formatGold, localized, mediaAsset, qualityColor } = require('../../utils/wow');
 
@@ -20,6 +20,7 @@ const data = new SlashCommandBuilder()
       .setRequired(true)
   );
 
+addGameOption(data);
 addRegionOption(data);
 
 function isItemId(query) {
@@ -67,9 +68,9 @@ function buildEmbed({ item, iconUrl, locale }) {
 }
 
 /** Icons are a separate document; a failure there should not lose the item itself. */
-async function loadIcon(itemId, region) {
+async function loadIcon(itemId, scope) {
   try {
-    const media = await getItemMedia(itemId, { region });
+    const media = await getItemMedia(itemId, { region: scope.region, game: scope.game });
     return mediaAsset(media, 'icon');
   } catch (err) {
     console.warn(`Could not load media for item ${itemId}: ${err.message}`);
@@ -77,9 +78,9 @@ async function loadIcon(itemId, region) {
   }
 }
 
-async function replyWithItem(interaction, itemId, region, locale) {
-  const item = await getItem(itemId, { region });
-  const iconUrl = await loadIcon(item.id, region);
+async function replyWithItem(interaction, itemId, scope, locale) {
+  const item = await getItem(itemId, { region: scope.region, game: scope.game });
+  const iconUrl = await loadIcon(item.id, scope);
 
   await interaction.editReply({ embeds: [buildEmbed({ item, iconUrl, locale })] });
 }
@@ -88,12 +89,12 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   const query = interaction.options.getString('query').trim();
-  const region = resolveRegion(interaction);
+  const scope = resolveScope(interaction);
   const locale = readConfig().blizzard.locale;
 
   if (isItemId(query)) {
     try {
-      await replyWithItem(interaction, query, region, locale);
+      await replyWithItem(interaction, query, scope, locale);
     } catch (err) {
       if (err instanceof BlizzardApiError && err.isNotFound) {
         await interaction.editReply(`❌ No item with ID **${query}**.`);
@@ -104,7 +105,7 @@ async function execute(interaction) {
     return;
   }
 
-  const search = await searchItems(query, { region, locale });
+  const search = await searchItems(query, { region: scope.region, game: scope.game, locale });
   const results = search.results ?? [];
 
   if (results.length === 0) {
@@ -118,7 +119,7 @@ async function execute(interaction) {
 
   // An exact single hit is the common case; show the full item card for it.
   if (results.length === 1) {
-    await replyWithItem(interaction, results[0].data.id, region, locale);
+    await replyWithItem(interaction, results[0].data.id, scope, locale);
     return;
   }
 

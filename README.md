@@ -14,9 +14,24 @@ Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no databas
 | `/mythicplus <character> <realm> [region]` | Current-season Mythic+ rating and the best keystone runs, showing key level, dungeon, time, and whether it was timed. |
 | `/realm <realm> [region]` | Realm type, category, timezone, up/down status, population, queue state, and connected realms. Suggests near matches on a miss. |
 | `/item <query> [region]` | Item lookup by **exact name** or item ID: quality, item level, type, slot, required level, sell price, and icon. |
+| `/realms [search] [game] [region]` | Lists every playable realm, or searches them. Shows exact slugs when searching. |
 | `/token [region]` | Current WoW Token price in gold. |
 
-Every command takes an optional `region` (`US`, `EU`, `KR`, `TW`). When omitted, `BLIZZARD_REGION` is used.
+Every command takes an optional `region` (`US`, `EU`, `KR`, `TW`). All except `/mythicplus` also take an optional `game`. When omitted, `BLIZZARD_REGION` and `BLIZZARD_GAME` are used.
+
+### Game versions
+
+| `game` | Namespace | What it covers |
+| --- | --- | --- |
+| `retail` | `dynamic-us` | Modern WoW. |
+| `classic` | `dynamic-classic-us` | Progression Classic — **the Burning Crusade Anniversary realms** (Maladath, Skyfury, Angerforge, Faerlina, Whitemane…) alongside the other progression realms. |
+| `classic-era` | `dynamic-classic1x-us` | Permanent vanilla, including Hardcore (Whitemane, Doomhowl, Living Flame…). |
+
+Blizzard exposes only these three. There is no per-expansion namespace — `classictbc`, `classicwlk`, `classic2x` and similar all return 403, so TBC Anniversary realms are reached through `classic`, not a namespace of their own.
+
+`/mythicplus` is Retail-only and takes no `game` option, since Mythic+ does not exist in Classic.
+
+> **Classic caveat:** Game Data (realms, status, population, items, token) is fully available for Classic. Blizzard's **character profile** data for Classic is thin to non-existent, so `/character` may return "not found" for a character that plainly exists.
 
 > **Note on `/item`:** Blizzard's item search matches full names only — there is no substring or fuzzy search in the API. `Thunderfury` will not find `Thunderfury, Blessed Blade of the Windseeker`; pass the exact name or the item ID.
 
@@ -55,6 +70,7 @@ cp .env.example .env
 | `BLIZZARD_CLIENT_SECRET` | yes | Battle.net API client secret. |
 | `BLIZZARD_REGION` | no | Default region: `us`, `eu`, `kr`, or `tw`. Defaults to `us`. |
 | `BLIZZARD_LOCALE` | no | Response locale, e.g. `en_US`, `de_DE`, `ko_KR`. Defaults to `en_US`. |
+| `BLIZZARD_GAME` | no | Default game version: `retail`, `classic`, or `classic-era`. Defaults to `retail`. |
 
 The bot refuses to start and names what is missing if a required value is absent.
 
@@ -88,6 +104,7 @@ handlers/interactionHandler  Routes interactions and turns errors into replies
 utils/blizzard/client.js     OAuth tokens, namespaces, timeouts, retries
 utils/blizzard/profile.js    Character endpoints (profile-{region} namespace)
 utils/blizzard/gameData.js   Realm, token, and item endpoints
+utils/blizzard/realms.js     Cached realm index, resolution, and search
 utils/commandRegistration.js Recursive command loader + Discord registration
 utils/wow.js                 Slugs, colours, and formatting helpers
 __tests__/                   Jest suites mirroring the source layout
@@ -127,7 +144,8 @@ Throw from `execute` and the interaction handler will translate it into a sensib
 - **Retries.** Rate limits (429), server errors (5xx), and network failures are retried up to three times with backoff, honouring `Retry-After`. 404s and other 4xx responses fail immediately.
 - **Rate limits.** Blizzard allows 36,000 requests per hour and 100 per second per client, which these commands will not approach in normal use.
 - **Regions.** `us`, `eu`, `kr`, and `tw` are supported. China sits behind a separate gateway (`gateway.battlenet.com.cn`) and is not wired up.
-- **Realm slugs** are derived automatically, so `Area 52`, `area-52`, and `AREA 52` all work, as do apostrophes (`Mal'Ganis`) and accents (`Éonar`).
+- **Realm slugs are resolved from the live realm index**, not guessed, because Blizzard's slug rule is unintuitive: hyphens and apostrophes are *deleted* rather than turned into separators (`Azjol-Nerub` → `azjolnerub`), while accents are *preserved* (`Festung der Stürme` → `festung-der-stürme`). The index is cached for six hours per region+game, and matching is forgiving — `Azjol-Nerub`, `azjol nerub`, and `AZJOLNERUB` all resolve. If the index cannot be read, the bot falls back to a derived slug, which is validated against all 801 live realms.
+- **Internal realms are hidden.** Blizzard's index includes non-playable entries (`US1A2-INST`, `US2 CWOW CSI 80`, `zzz_RDB EU`); `/realms` filters them out. US retail drops from 345 entries to 248 playable realms.
 
 ---
 

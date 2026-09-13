@@ -47,15 +47,36 @@ function stripDiacritics(value) {
 }
 
 /**
- * Converts a realm name to the slug Blizzard expects in profile URLs.
- * "Area 52" -> "area-52", "Mal'Ganis" -> "malganis", "Azjol-Nerub" -> "azjol-nerub".
+ * Converts a realm name to the slug Blizzard expects in API paths.
+ *
+ * The rule, verified against all 801 realms across us/eu/kr/tw: lowercase,
+ * delete every character that is not a letter, digit, or space, then turn
+ * runs of spaces into hyphens. Two consequences are easy to get wrong:
+ *
+ *   - Hyphens and apostrophes are DELETED, not turned into separators.
+ *     "Azjol-Nerub" -> "azjolnerub", "Mal'Ganis" -> "malganis".
+ *   - Accents are PRESERVED, not folded to ASCII.
+ *     "Festung der Stürme" -> "festung-der-stürme".
+ *
+ * Only spaces become hyphens: "Area 52" -> "area-52".
  */
 function slugifyRealm(realm) {
-  return stripDiacritics(String(realm ?? ''))
+  return String(realm ?? '')
     .toLowerCase()
-    .replace(/['’]/g, '') // apostrophes vanish rather than becoming separators
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-');
+}
+
+/**
+ * A forgiving key for comparing realm names the user typed against real ones.
+ * Folds accents and drops every separator, so "Azjol-Nerub", "azjol nerub",
+ * and "azjolnerub" all collapse to the same value.
+ */
+function realmMatchKey(value) {
+  return stripDiacritics(String(value ?? ''))
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
 }
 
 // Character names are lowercased in the path; encode so accented names survive.
@@ -183,6 +204,7 @@ module.exports = {
   localized,
   mediaAsset,
   qualityColor,
+  realmMatchKey,
   slugifyRealm,
   stripDiacritics,
   titleCase

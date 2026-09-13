@@ -3,7 +3,17 @@ jest.mock('../../utils/blizzard/profile', () => ({
   getCharacterMedia: jest.fn()
 }));
 
+// The realm resolver reads the live realm index; stub it so tests stay offline.
+jest.mock('../../utils/blizzard/realms', () => ({
+  resolveRealm: jest.fn(async query => ({
+    slug: String(query).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ +/g, '-'),
+    name: query,
+    resolved: true
+  }))
+}));
+
 const { getCharacterProfile, getCharacterMedia } = require('../../utils/blizzard/profile');
+const { resolveRealm } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/character');
 const { createInteraction, field, replyEmbed, replyPayload } = require('../helpers/interaction');
@@ -43,18 +53,24 @@ beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   getCharacterProfile.mockResolvedValue(PROFILE);
   getCharacterMedia.mockResolvedValue(MEDIA);
+  resolveRealm.mockImplementation(async query => ({
+    slug: String(query).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ +/g, '-'),
+    name: query,
+    resolved: true
+  }));
 });
 
 afterEach(() => jest.restoreAllMocks());
 
 describe('/character definition', () => {
-  it('requires a character and realm, and offers an optional region', () => {
+  it('requires a character and realm, and offers optional game and region', () => {
     const json = command.data.toJSON();
 
     expect(json.name).toBe('character');
     expect(json.options.map(option => [option.name, option.required])).toEqual([
       ['character', true],
       ['realm', true],
+      ['game', false],
       ['region', false]
     ]);
   });
@@ -88,7 +104,8 @@ describe('/character execute', () => {
       media: null,
       region: 'us',
       realmSlug: 'area-52',
-      characterName: 'Thrall'
+      characterName: 'Thrall',
+      scopeLabel: 'US'
     });
 
     expect(embed.toJSON().color).toBe(0x0070dd); // Shaman blue
@@ -98,9 +115,9 @@ describe('/character execute', () => {
     await command.execute(interaction({ region: 'eu' }));
 
     expect(getCharacterProfile).toHaveBeenCalledWith(
-      'Area 52',
+      'area-52',
       'Thrall',
-      expect.objectContaining({ region: 'eu' })
+      expect.objectContaining({ region: 'eu', game: 'retail' })
     );
   });
 

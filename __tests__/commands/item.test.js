@@ -49,7 +49,7 @@ describe('/item by id', () => {
 
     await command.execute(target);
 
-    expect(getItem).toHaveBeenCalledWith('19019', { region: 'us' });
+    expect(getItem).toHaveBeenCalledWith('19019', { region: 'us', game: 'retail' });
     expect(searchItems).not.toHaveBeenCalled();
 
     const embed = replyEmbed(target);
@@ -98,7 +98,7 @@ describe('/item by name', () => {
 
     await command.execute(target);
 
-    expect(getItem).toHaveBeenCalledWith(19019, { region: 'us' });
+    expect(getItem).toHaveBeenCalledWith(19019, { region: 'us', game: 'retail' });
     expect(replyEmbed(target).title).toContain('Thunderfury');
   });
 
@@ -151,7 +151,7 @@ describe('/item by name', () => {
 
     expect(searchItems).toHaveBeenCalledWith(
       'Thunderfury',
-      expect.objectContaining({ region: 'eu' })
+      expect.objectContaining({ region: 'eu', game: 'retail' })
     );
   });
 });

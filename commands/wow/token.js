@@ -3,7 +3,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getWowTokenPrice } = require('../../utils/blizzard/gameData');
-const { addRegionOption, resolveRegion } = require('../../utils/commandOptions');
+const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { discordTimestamp, formatGold } = require('../../utils/wow');
 
 const GOLD_COLOR = 0xffd100;
@@ -12,12 +12,13 @@ const data = new SlashCommandBuilder()
   .setName('token')
   .setDescription('Show the current WoW Token price.');
 
+addGameOption(data);
 addRegionOption(data, 'Region to price the token in.');
 
-function buildEmbed({ token, region }) {
+function buildEmbed({ token, scopeLabel }) {
   const embed = new EmbedBuilder()
     .setColor(GOLD_COLOR)
-    .setTitle(`WoW Token — ${region.toUpperCase()}`)
+    .setTitle(`WoW Token — ${scopeLabel}`)
     .addFields({ name: 'Price', value: formatGold(token.price), inline: true });
 
   const updated = discordTimestamp(token.last_updated_timestamp);
@@ -31,10 +32,10 @@ function buildEmbed({ token, region }) {
 async function execute(interaction) {
   await interaction.deferReply();
 
-  const region = resolveRegion(interaction);
-  const token = await getWowTokenPrice({ region });
+  const scope = resolveScope(interaction);
+  const token = await getWowTokenPrice({ region: scope.region, game: scope.game });
 
-  await interaction.editReply({ embeds: [buildEmbed({ token, region })] });
+  await interaction.editReply({ embeds: [buildEmbed({ token, scopeLabel: scope.label })] });
 }
 
 module.exports = {

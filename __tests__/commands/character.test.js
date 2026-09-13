@@ -65,13 +65,13 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('/character definition', () => {
-  it('requires a character and realm, and offers optional game and region', () => {
+  it('requires only a character once a home realm is configured', () => {
     const json = command.data.toJSON();
 
     expect(json.name).toBe('character');
     expect(json.options.map(option => [option.name, option.required])).toEqual([
       ['character', true],
-      ['realm', true],
+      ['realm', false],
       ['game', false],
       ['region', false]
     ]);

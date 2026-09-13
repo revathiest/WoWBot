@@ -58,11 +58,11 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('/realm', () => {
-  it('requires a realm and takes optional game and region', () => {
+  it('makes realm optional when a home realm is configured', () => {
     const json = command.data.toJSON();
 
     expect(json.options.map(option => [option.name, option.required])).toEqual([
-      ['realm', true],
+      ['realm', false],
       ['game', false],
       ['region', false]
     ]);

@@ -62,7 +62,9 @@ function readConfig(env = process.env) {
       clientSecret: env.BLIZZARD_CLIENT_SECRET ?? '',
       region: normalizeRegion(env.BLIZZARD_REGION) ?? DEFAULT_REGION,
       locale: (env.BLIZZARD_LOCALE ?? '').trim() || DEFAULT_LOCALE,
-      game: normalizeGame(env.BLIZZARD_GAME) ?? DEFAULT_GAME
+      game: normalizeGame(env.BLIZZARD_GAME) ?? DEFAULT_GAME,
+      // Optional home realm, so commands can omit `realm` entirely.
+      realm: (env.BLIZZARD_REALM ?? '').trim() || null
     }
   };
 }

@@ -10,7 +10,13 @@ const {
   searchRealms
 } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
+const {
+  addGameOption,
+  addRealmOption,
+  addRegionOption,
+  resolveRealmName,
+  resolveScope
+} = require('../../utils/commandOptions');
 const { idFromHref } = require('../../utils/wow');
 
 const UP_COLOR = 0x43b581;
@@ -19,14 +25,9 @@ const MAX_SUGGESTIONS = 5;
 
 const data = new SlashCommandBuilder()
   .setName('realm')
-  .setDescription('Show the status and population of a realm.')
-  .addStringOption(option =>
-    option
-      .setName('realm')
-      .setDescription('Realm name, e.g. Area 52')
-      .setRequired(true)
-  );
+  .setDescription('Show the status and population of a realm.');
 
+addRealmOption(data);
 addGameOption(data);
 addRegionOption(data);
 
@@ -79,8 +80,15 @@ async function suggestRealms(query, scope) {
 async function execute(interaction) {
   await interaction.deferReply();
 
-  const realmName = interaction.options.getString('realm');
+  const realmName = resolveRealmName(interaction);
   const scope = resolveScope(interaction);
+
+  if (!realmName) {
+    await interaction.editReply(
+      '❌ No realm given, and no default realm is configured. Pass the `realm` option.'
+    );
+    return;
+  }
 
   // Resolve against the real realm list rather than guessing the slug.
   const target = await resolveRealm(realmName, { region: scope.region, game: scope.game });

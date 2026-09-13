@@ -4,6 +4,8 @@ module.exports = {
   moduleFileExtensions: ['js', 'json'],
   // Only *.test.js are suites; everything else under __tests__ is shared helpers.
   testMatch: ['<rootDir>/__tests__/**/*.test.js'],
+  // Pins BLIZZARD_* so results never depend on the developer's local .env.
+  setupFiles: ['<rootDir>/jest.setup.js'],
 
   // === COVERAGE SETTINGS ===
   coverageDirectory: 'coverage',

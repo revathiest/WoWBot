@@ -19,7 +19,8 @@ const FULL_ENV = {
   BLIZZARD_CLIENT_SECRET: 'client-secret',
   BLIZZARD_REGION: 'eu',
   BLIZZARD_LOCALE: 'en_GB',
-  BLIZZARD_GAME: 'classic'
+  BLIZZARD_GAME: 'classic',
+  BLIZZARD_REALM: 'Nightslayer'
 };
 
 describe('normalizeRegion', () => {
@@ -51,7 +52,8 @@ describe('readConfig', () => {
       clientSecret: 'client-secret',
       region: 'eu',
       locale: 'en_GB',
-      game: 'classic'
+      game: 'classic',
+      realm: 'Nightslayer'
     });
   });
 
@@ -65,6 +67,11 @@ describe('readConfig', () => {
     expect(config.blizzard.region).toBe(DEFAULT_REGION);
     expect(config.blizzard.locale).toBe(DEFAULT_LOCALE);
     expect(config.blizzard.game).toBe(DEFAULT_GAME);
+  });
+
+  it('treats a blank home realm as absent', () => {
+    expect(readConfig({ BLIZZARD_REALM: '   ' }).blizzard.realm).toBeNull();
+    expect(readConfig({}).blizzard.realm).toBeNull();
   });
 
   it('treats a blank guild id as absent, so commands register globally', () => {

@@ -34,6 +34,27 @@ function addGameOption(builder, description = 'Game version. Defaults to the bot
   );
 }
 
+/**
+ * Adds the realm option. It is required only when no home realm is configured,
+ * so a guild that sets BLIZZARD_REALM never has to type it.
+ */
+function addRealmOption(builder, config = readConfig()) {
+  const home = config.blizzard.realm;
+
+  return builder.addStringOption(option =>
+    option
+      .setName('realm')
+      .setDescription(home ? `Realm name. Defaults to ${home}.` : 'Realm name, e.g. Area 52')
+      .setRequired(!home)
+  );
+}
+
+/** Reads the realm option, falling back to the configured home realm. */
+function resolveRealmName(interaction, config = readConfig()) {
+  const chosen = interaction.options?.getString?.('realm');
+  return (chosen ?? '').trim() || config.blizzard.realm;
+}
+
 /** Reads the region option, falling back to the configured default. */
 function resolveRegion(interaction, config = readConfig()) {
   const chosen = interaction.options?.getString?.('region');
@@ -63,7 +84,9 @@ function resolveScope(interaction, config = readConfig()) {
 module.exports = {
   GAME_CHOICES,
   addGameOption,
+  addRealmOption,
   addRegionOption,
+  resolveRealmName,
   resolveGame,
   resolveRegion,
   resolveScope

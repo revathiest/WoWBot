@@ -5,7 +5,13 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getCharacterProfile, getCharacterMedia } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const { findRealmGames, resolveRealm } = require('../../utils/blizzard/realms');
-const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
+const {
+  addGameOption,
+  addRealmOption,
+  addRegionOption,
+  resolveRealmName,
+  resolveScope
+} = require('../../utils/commandOptions');
 const {
   armoryUrl,
   classColor,
@@ -22,14 +28,9 @@ const data = new SlashCommandBuilder()
       .setName('character')
       .setDescription('Character name, e.g. Thrall')
       .setRequired(true)
-  )
-  .addStringOption(option =>
-    option
-      .setName('realm')
-      .setDescription('Realm name, e.g. Area 52')
-      .setRequired(true)
   );
 
+addRealmOption(data);
 addGameOption(data);
 addRegionOption(data);
 
@@ -89,9 +90,16 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   const characterName = interaction.options.getString('character');
-  const realm = interaction.options.getString('realm');
+  const realm = resolveRealmName(interaction);
   const scope = resolveScope(interaction);
   const { region, game } = scope;
+
+  if (!realm) {
+    await interaction.editReply(
+      '❌ No realm given, and no default realm is configured. Pass the `realm` option.'
+    );
+    return;
+  }
 
   const target = await resolveRealm(realm, { region, game });
   const realmSlug = target.slug;

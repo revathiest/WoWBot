@@ -10,9 +10,9 @@ Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no databas
 
 | Command | What it does |
 | --- | --- |
-| `/character <character> <realm> [region]` | Level, race, class and spec, faction, guild, item level, achievement points, and last login, with the character's avatar and render. |
+| `/character <character> [realm] [game] [region]` | Level, race, class and spec, faction, guild, item level, achievement points, and last login, with the character's avatar and render. |
 | `/mythicplus <character> <realm> [region]` | Current-season Mythic+ rating and the best keystone runs, showing key level, dungeon, time, and whether it was timed. |
-| `/realm <realm> [region]` | Realm type, category, timezone, up/down status, population, queue state, and connected realms. Suggests near matches on a miss. |
+| `/realm [realm] [game] [region]` | Realm type, category, timezone, up/down status, population, queue state, and connected realms. Suggests near matches on a miss. |
 | `/item <query> [region]` | Item lookup by **exact name** or item ID: quality, item level, type, slot, required level, sell price, and icon. |
 | `/realms [search] [game] [region]` | Lists every playable realm, or searches them. Shows exact slugs when searching. |
 | `/token [region]` | Current WoW Token price in gold. |
@@ -75,7 +75,8 @@ cp .env.example .env
 | `BLIZZARD_CLIENT_SECRET` | yes | Battle.net API client secret. |
 | `BLIZZARD_REGION` | no | Default region: `us`, `eu`, `kr`, or `tw`. Defaults to `us`. |
 | `BLIZZARD_LOCALE` | no | Response locale, e.g. `en_US`, `de_DE`, `ko_KR`. Defaults to `en_US`. |
-| `BLIZZARD_GAME` | no | Default game version: `retail`, `classic`, or `classic-era`. Defaults to `retail`. |
+| `BLIZZARD_GAME` | no | Default game version: `anniversary`, `retail`, `classic`, or `classic-era`. Defaults to `retail`. |
+| `BLIZZARD_REALM` | no | Home realm. When set, `realm` becomes optional on `/character` and `/realm` and defaults to this. |
 
 The bot refuses to start and names what is missing if a required value is absent.
 

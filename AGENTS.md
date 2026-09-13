@@ -61,6 +61,15 @@ Keep these boundaries — the tests rely on them for mocking:
 - **Never act without `enforcement.preflight()`.** It checks bot permissions, the server owner, and role hierarchy. A blocked action still raises an alert; silent failure is the worst outcome.
 - New scam patterns need a negative test proving ordinary guild chat does not match. `/spam test` exists for tuning them safely.
 
+## Arena, guild, and enchant audit
+
+- **Never hardcode a PvP season.** `getCurrentSeasonId` reads it from the API; it is 3 today and will not stay that way.
+- **Ladders are cached for 10 minutes** in `utils/blizzard/pvp.js`. One bracket is ~5,000 entries and a rank lookup scans all of them, so do not fetch per bracket per invocation without the cache.
+- **Only `2v2`, `3v3` and `5v5` exist in TBC.** The API also advertises `blitz-overall`, `shuffle-overall` and `rbg`; those are retail-only and empty.
+- **The enchant audit must know which slots TBC can enchant.** Neck, waist, trinkets, shirt and tabard cannot be, and a relic (idol/libram/totem) in the ranged slot cannot either. Flagging them produces permanent false positives and destroys trust in the command. Rings are enchanter-only, so they are reported separately rather than as failures.
+- **Sockets are not auditable.** `sockets` is absent from equipped items and null on the item document, so an empty socket is indistinguishable from no socket. Do not add "missing gem" checks; there is no data for them.
+- **Guilds have no index endpoint.** Unlike realms, the slug must be derived, so a bad guild name cannot produce suggestions. Report the slug that was tried.
+
 ## Testing
 
 - `npm test` runs Jest with coverage and an 80% global threshold. Keep it passing.

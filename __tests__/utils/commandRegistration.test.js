@@ -45,7 +45,10 @@ describe('loadCommandsRecursively', () => {
     const commands = loadCommandsRecursively();
 
     expect([...commands.keys()].sort()).toEqual([
+      'arena',
+      'audit',
       'character',
+      'guild',
       'item',
       'mythicplus',
       'realm',

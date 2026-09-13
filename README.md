@@ -19,6 +19,9 @@ Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no databas
 | `/item <query> [region]` | Item lookup by **exact name** or item ID: quality, item level, type, slot, required level, sell price, and icon. |
 | `/realms [search] [game] [region]` | Lists every playable realm, or searches them. Shows exact slugs when searching. |
 | `/token [region]` | Current WoW Token price in gold. |
+| `/arena ladder \| rank` | Arena ladder standings for a bracket, or where one character ranks across 2v2, 3v3 and 5v5. |
+| `/guild <guild> [realm] [game] [region]` | Guild roster: size, faction, guild master, class and level spread, and max-level members. |
+| `/audit <character> [realm] [game] [region]` | Raid-readiness check — finds missing enchants on the slots TBC actually enchants. |
 | `/spam status \| test \| configure …` | Inspect, dry-run, and tune spam detection. Requires Manage Server. |
 
 Every command takes an optional `region` (`US`, `EU`, `KR`, `TW`). All except `/mythicplus` also take an optional `game`. When omitted, `BLIZZARD_REGION` and `BLIZZARD_GAME` are used.
@@ -184,6 +187,12 @@ Throw from `execute` and the interaction handler will translate it into a sensib
 ---
 
 ## API behaviour worth knowing
+
+- **`/audit` checks enchants, not gems.** Blizzard exposes gems that are socketed but never the socket list — `sockets` is absent from equipped items and null on the item document — so an empty socket cannot be told apart from an item with no sockets. The audit also only flags slots TBC can actually enchant; neck, waist, trinkets, shirt and tabard are skipped, as is a relic in the ranged slot.
+
+- **Arena ladders are cached for 10 minutes.** A single TBC bracket returns around 5,000 entries and finding one character means scanning the whole list, so repeated `/arena rank` lookups reuse the cached ladder. The season id is resolved from the API, never hardcoded.
+
+- **Guild names have no index to resolve against**, unlike realms. The slug is derived with the same rule realms use, so a guild must be spelled as it appears in game; a miss reports the slug it tried rather than guessing again.
 
 - **Commands register per guild, never globally.** Guild commands appear instantly; global registration can take up to an hour to propagate, which makes a new command feel broken. On startup the bot registers to every guild it is in, and it registers to any guild that invites it the moment it joins — no restart needed. Leftover global commands are cleared so nothing shows up twice.
 

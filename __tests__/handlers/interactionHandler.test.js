@@ -147,7 +147,9 @@ describe('dead interactions', () => {
   });
 
   it('distinguishes the two codes, because their causes differ', () => {
-    const now = Date.now();
+    // Pin the clock: real time passes between building the fixture and asserting.
+    const now = 1_700_000_000_000;
+    jest.spyOn(Date, 'now').mockReturnValue(now);
 
     const expired = describeDeadInteraction({ code: 10062 }, { createdTimestamp: now - 800 });
     expect(expired).toContain('800ms old');

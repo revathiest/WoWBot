@@ -5,7 +5,16 @@ Conventions for anyone — human or agent — working in this repository.
 ## Shape of the project
 
 - **CommonJS, not ESM.** `require` / `module.exports` throughout. Do not add `"type": "module"`.
-- **No database.** Everything from the Blizzard API is fetched per request. The single exception is `data/spam.json`, which holds moderation settings so `/spam configure` survives a restart. Do not add a second store without a very good reason, and never put user data in it.
+- **No database.** Everything from the Blizzard API is fetched per request. Four JSON files under `data/` are the exceptions, and each earned its place:
+  - `spam.json` — moderation settings, so `/spam configure` survives a restart.
+  - `reports.json` — weekly-report settings: which WoW guilds are tracked, where and when to post.
+  - `reports/<guild-key>.json` — last week's snapshot per tracked guild. **This one is load-bearing, not a cache.** The Blizzard API reports only current state — a season's total wins, a lifetime honorable-kill count, today's roster — so "gained 180 rating this week" cannot be computed without keeping last week's numbers to subtract from. Delete these and every report degrades to a first run.
+  - `onboarding.json` — settings for the auto-kick sweep, including the cutoff instant that protects existing members.
+  - `onboarding-warned.json` — who has already had the "pick a role" reminder DM, so a restarting bot does not DM the same person repeatedly. Self-prunes every sweep.
+  - `tickets.json` — ticket lobby settings, moderator roles, open tickets, and closed-ticket history. Replaces the three MySQL tables the ticket system used in the bot it was ported from.
+  - `links.json` — Discord user id → the characters that person claimed with `/iam`. **This is the only user data the bot stores**, it is volunteered rather than harvested, it holds nothing but an id and character names, and `/iam forget` deletes a user's entry outright. Keep it that way: do not add display names, activity, or anything the user did not type in themselves.
+
+  Do not add another store without a very good reason.
 - **Privileged intents: `MessageContent` and `GuildMembers` are enabled, for spam detection only.** They must be switched on in the Discord Developer Portal or login fails. Do not add further privileged intents, and do not use these two for anything beyond moderation.
 - **Native `fetch`.** Node 20+ provides it. Do not add axios, node-fetch, or a request library.
 
@@ -69,6 +78,55 @@ Keep these boundaries — the tests rely on them for mocking:
 - **The enchant audit must know which slots TBC can enchant.** Neck, waist, trinkets, shirt and tabard cannot be, and a relic (idol/libram/totem) in the ranged slot cannot either. Flagging them produces permanent false positives and destroys trust in the command. Rings are enchanter-only, so they are reported separately rather than as failures.
 - **Sockets are not auditable.** `sockets` is absent from equipped items and null on the item document, so an empty socket is indistinguishable from no socket. Do not add "missing gem" checks; there is no data for them.
 - **Guilds have no index endpoint.** Unlike realms, the slug must be derived, so a bad guild name cannot produce suggestions. Report the slug that was tried.
+
+## Weekly reports
+
+- **Snapshots are the feature.** Every delta in a report exists because the previous week's numbers were kept. Nothing in the Blizzard API is per-week. If a change makes snapshots optional, it has removed the point of the command.
+- **Previewing must never persist.** `/report now` builds a report without saving a snapshot, because saving consumes the baseline the next report subtracts from — preview on Sunday with persistence on and Monday's scheduled report covers one day instead of seven. Only the scheduled run and `/report post` save, and both reset the week deliberately.
+- **A 404 from `pvp-summary` is normal, not a failure.** Measured against a real 240-member guild, 23 members had no PvP summary: bank alts parked at level 1, plus characters whose profile Blizzard has not published. `collectKills` counts those separately from real errors. Reporting them as failures would put a warning on every report and teach people to ignore it.
+- **Guild rosters carry a class ID, not a class name.** On Anniversary, `playable_class.name` is absent from roster entries — only `id` is there — so anything printing a class must resolve ids through `getPlayableClassIndex`. (The class breakdown in `/guild` predates this and is empty on Anniversary for exactly this reason.)
+- **Ladders are scanned per bracket, never per character.** There is no per-character ladder endpoint, and one bracket is ~5,000 entries, so three cached list scans beat hundreds of requests for a 240-member guild.
+- **The schedule is a weekly slot, not a timer.** Each tick asks "has the most recent slot passed without a post since?". That is what makes an offline bot report late rather than never, and a restarting bot report once rather than every five minutes.
+- **Times are UTC, and every surface says so.** A timezone library is a dependency this project does not take, and reading the host's local zone would silently shift everyone's report when the box moves.
+- **Posting is not an interaction, so `GUILD_ID` has to be checked by hand.** Nothing else stops a second instance sharing the token from double-posting; `publishReports` runs the channel's guild through `isGuildInScope` before sending.
+- **The level cap is derived from the roster, never hardcoded.** TBC is 70 today and Anniversary realms advance on Blizzard's schedule.
+- **Mentions are an upgrade, never a requirement.** Reports are built from guild rosters and read correctly with `links.json` empty; a link only turns a character name into a mention.
+
+## Onboarding auto-kick
+
+This is the only feature that acts on somebody for something they did **not** do, on a timer. Three rules are non-negotiable:
+
+- **Never act on missing data.** A failed member fetch returns `null`, not `[]` — an empty list reads as "nobody has roles" and is the one misreading that could empty a server. An unknown `joinedTimestamp` is an exemption, never "joined in 1970".
+- **The cutoff is the safety rail.** `enabledAt` is stamped when the sweep is switched on, and anyone who joined before it can never be removed. This is what makes enabling safe in a server with hundreds of roleless veterans. It is re-stamped on every off-to-on transition: re-enabling can surprise an admin by doing nothing, never by kicking somebody unexpected.
+- **The DM goes out before the kick.** Discord will not deliver a direct message to someone you no longer share a guild with, so reversing the order silently drops every explanation. The kick proceeds whether or not the DM lands.
+
+Also worth keeping:
+
+- **`@everyone` is not a chosen role.** It is always in `roles.cache`, so `describeMember` discounts it; forgetting that would exempt the entire server.
+- **Re-check the live member before kicking.** Classification and action are seconds apart, and somebody who picked a role in between must not be removed for not having one.
+- **`MAX_KICKS_PER_SWEEP` is a blast radius, not a rate limit.** A wrong grace period or a broken auto-role bot should cost a handful of people and raise an alert, not clear the server.
+- **Enabling requires an audit channel.** With no database, that channel is the only record of who was removed and why.
+- **Preflight covers kicks too.** `enforcement.preflight` takes `action: 'kick'`; the owner and role-hierarchy rules are identical whatever the reason for acting, and one place knowing them is what stops a second caller getting them wrong.
+
+## Tickets
+
+Ported from the Squadron 42 bot's `tickets/` module. Same behaviour, different storage — that bot uses MySQL and this one has no database, so `utils/tickets/store.js` stands in for `ticket_settings`, `ticket_roles` and `tickets`.
+
+Four things were fixed rather than copied. Do not "restore" them:
+
+- **The lobby channel need not be in a category.** The original reads `lobbyChannel.parent` and refuses to create a ticket when it is null, which makes the whole system fail silently in a server that keeps its support channel at the top level. Here a null parent just means the ticket channel is created at the root too.
+- **Nothing is recorded until the channel exists.** The original `INSERT`s the ticket, then creates the channel; a permissions failure leaves a ticket row pointing at nothing. Here `reserveId()` hands out the number (it is part of the channel name) and `openTicket()` is called only once the channel is really there.
+- **Manage Server always counts as a moderator.** The original falls back to a permission check *only* when no moderator roles are configured, so adding the first role locks out every admin who does not hold it.
+- **There is a per-user cap on open tickets.** Each one is a real channel, and the original has no limit at all.
+
+Other things worth keeping:
+
+- **Custom ids are the routing contract**: `ticket:<action>[:<ticketId>]`, matched by prefix in `handlers/interactionHandler.js`. A component belongs to whatever posted it, not to a slash command, which is why it is not routed through `client.commands`.
+- **`handlers/interactionHandler.js` now routes buttons and modals**, and the `GUILD_ID` scope check runs *before* the interaction-type check so a pinned instance ignores another guild's button presses too. Two instances answering one click is the same failure mode as the `10062` race on commands.
+- **Ticket ids are never reused.** `normalizeStore` raises `nextId` above the highest id in open *or* closed tickets, because a recycled id would attach a new ticket's buttons to an old ticket's history.
+- **The lobby panel is re-posted at startup.** It is an ordinary message and can be deleted or purged; without `ensureLobbyMessage` on ready, the Open Ticket button quietly stops existing.
+- **Closed-ticket history is capped** at `MAX_CLOSED_HISTORY`. Everything else in `data/` is settings; this is the one list that would otherwise grow forever.
+- **Close answers the interaction before rearranging the channel.** Editing permission overwrites and moving a channel between categories takes long enough to risk the interaction expiring first.
 
 ## Testing
 

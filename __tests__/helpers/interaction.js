@@ -7,7 +7,10 @@ function createInteraction({
   commands,
   subcommand = null,
   subcommandGroup = null,
-  permissions = true
+  permissions = true,
+  user = { id: 'user-1', username: 'tester' },
+  client = {},
+  guild = { id: 'test-guild', name: 'Test Guild' }
 } = {}) {
   const read = name => (name in options ? options[name] : null);
 
@@ -16,7 +19,9 @@ function createInteraction({
     // Handlers scope work to the guild this instance serves, so a fake
     // interaction needs one or it is ignored as out of scope.
     guildId: 'test-guild',
-    client: { commands },
+    guild,
+    user,
+    client: { commands, ...client },
     memberPermissions: { has: () => permissions },
     options: {
       getString: read,
@@ -24,6 +29,7 @@ function createInteraction({
       getBoolean: read,
       getChannel: read,
       getRole: read,
+      getUser: read,
       getSubcommand: () => subcommand,
       getSubcommandGroup: () => subcommandGroup
     },

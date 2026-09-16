@@ -31,6 +31,17 @@ function getConnectedRealm(connectedRealmId, options = {}) {
   });
 }
 
+/**
+ * Playable classes for the game version.
+ *
+ * Needed because guild rosters identify a member's class by id only — on
+ * Anniversary `playable_class.name` is absent from roster entries, so anything
+ * that wants to print a class has to resolve ids itself.
+ */
+function getPlayableClassIndex(options = {}) {
+  return request('/data/wow/playable-class/index', { ...options, namespace: 'static' });
+}
+
 /** Full item document for a known item id. */
 function getItem(itemId, options = {}) {
   return request(`/data/wow/item/${itemId}`, { ...options, namespace: 'static' });
@@ -66,6 +77,7 @@ module.exports = {
   getConnectedRealm,
   getItem,
   getItemMedia,
+  getPlayableClassIndex,
   getRealm,
   getRealmIndex,
   getWowTokenPrice,

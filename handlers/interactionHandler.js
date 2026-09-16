@@ -4,6 +4,7 @@
 const { MessageFlags } = require('discord.js');
 const { BlizzardApiError } = require('../utils/blizzard/client');
 const { isGuildInScope } = require('../utils/guildScope');
+const { handleComponent: handleTicketComponent } = require('../utils/tickets/core');
 const { readConfig } = require('../config');
 
 /**
@@ -132,18 +133,49 @@ function resetIgnoredGuilds() {
   ignoredGuilds.clear();
 }
 
-async function handleInteraction(interaction) {
-  if (!interaction.isChatInputCommand?.()) return;
+/**
+ * Buttons and modals, which the ticket system uses for its whole member-facing
+ * flow. Routed here rather than through `client.commands` because a component
+ * belongs to whatever posted it, not to a slash command — the custom id is the
+ * routing key.
+ *
+ * Errors get the same treatment as a command's, so a failed button says
+ * something useful instead of spinning forever.
+ */
+async function handleComponentInteraction(interaction) {
+  try {
+    await handleTicketComponent(interaction);
+  } catch (err) {
+    if (isDeadInteraction(err)) {
+      console.warn(
+        `⚠️  component ${interaction.customId} [${err.code}] ${describeDeadInteraction(err, interaction)}`
+      );
+      return;
+    }
 
+    console.error(`❌ Error handling component ${interaction.customId}:`, err);
+    await respondWithError(interaction, describeError(err));
+  }
+}
+
+async function handleInteraction(interaction) {
   // GUILD_ID pins this instance to one guild; blank means serve them all.
   // Pinning is what lets a production and a dev instance share one bot token
-  // without racing for the right to answer.
+  // without racing for the right to answer. Checked before the interaction type
+  // so a pinned instance ignores another guild's buttons too.
   const configuredGuildId = readConfig().discord.guildId;
 
   if (!isGuildInScope(interaction.guildId, configuredGuildId)) {
     noteIgnoredGuild(interaction.guildId, configuredGuildId);
     return;
   }
+
+  if (interaction.isButton?.() || interaction.isModalSubmit?.()) {
+    await handleComponentInteraction(interaction);
+    return;
+  }
+
+  if (!interaction.isChatInputCommand?.()) return;
 
   const command = interaction.client.commands?.get(interaction.commandName);
 
@@ -189,6 +221,7 @@ module.exports = {
   DEAD_INTERACTION_CODES,
   describeDeadInteraction,
   describeError,
+  handleComponentInteraction,
   isDeadInteraction,
   resetIgnoredGuilds,
   handleInteraction,

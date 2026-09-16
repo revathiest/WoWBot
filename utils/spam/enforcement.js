@@ -12,22 +12,31 @@ const { PermissionFlagsBits } = require('discord.js');
 // the check.
 const BAN_DELETE_SECONDS = 3600;
 
+// What each action needs, and what to call it when the bot has not got it.
+const REQUIRED_PERMISSION = {
+  ban: { flag: PermissionFlagsBits.BanMembers, label: 'Ban Members' },
+  kick: { flag: PermissionFlagsBits.KickMembers, label: 'Kick Members' },
+  timeout: { flag: PermissionFlagsBits.ModerateMembers, label: 'Moderate Members' }
+};
+
 /**
  * Confirms the bot can actually act on this member.
+ *
+ * Shared by spam enforcement and the onboarding sweep: the rules about the
+ * server owner and role hierarchy are identical whatever the reason for acting,
+ * and having one place that knows them is what stops a second caller getting
+ * them subtly wrong.
+ *
  * @returns {{ ok: true } | { ok: false, reason: string }}
  */
 function preflight({ guild, member, action }) {
   const me = guild?.members?.me;
   if (!me) return { ok: false, reason: 'the bot is not cached in this guild' };
 
-  const needed =
-    action === 'ban' ? PermissionFlagsBits.BanMembers : PermissionFlagsBits.ModerateMembers;
+  const needed = REQUIRED_PERMISSION[action] ?? REQUIRED_PERMISSION.timeout;
 
-  if (!me.permissions?.has(needed)) {
-    return {
-      ok: false,
-      reason: `the bot lacks the ${action === 'ban' ? 'Ban Members' : 'Moderate Members'} permission`
-    };
+  if (!me.permissions?.has(needed.flag)) {
+    return { ok: false, reason: `the bot lacks the ${needed.label} permission` };
   }
 
   if (member.id === guild.ownerId) {
@@ -92,6 +101,7 @@ async function act({ message, member, decision }) {
 
 module.exports = {
   BAN_DELETE_SECONDS,
+  REQUIRED_PERMISSION,
   act,
   deleteMessage,
   preflight

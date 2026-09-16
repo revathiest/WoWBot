@@ -7,6 +7,8 @@ jest.mock('../../utils/spam/enforcement', () => ({
   act: jest.fn(async () => ({ acted: true, action: 'ban', deleted: true, blockedReason: null }))
 }));
 
+jest.mock('../../utils/tickets/core', () => ({ handleLobbyMessage: jest.fn(async () => false) }));
+
 jest.mock('../../utils/spam/alert', () => ({
   buildAlertEmbed: jest.fn(() => ({ toJSON: () => ({}) })),
   sendAlert: jest.fn(async () => true)
@@ -22,6 +24,7 @@ const {
   handleMessageUpdate,
   registerMessageHandler
 } = require('../../handlers/messageHandler');
+const { handleLobbyMessage } = require('../../utils/tickets/core');
 const { createMember, createMessage } = require('../helpers/message');
 
 const enabled = (overrides = {}) => normalizeConfig({ enabled: true, alertChannelId: 'c9', ...overrides });
@@ -213,5 +216,39 @@ describe('registerMessageHandler', () => {
 
     await expect(wrapped(createMessage())).resolves.toBeUndefined();
     expect(console.error).toHaveBeenCalled();
+  });
+});
+
+describe('ticket lobby policing', () => {
+  beforeEach(() => {
+    handleLobbyMessage.mockClear();
+    handleLobbyMessage.mockResolvedValue(false);
+  });
+
+  it('offers every guild message to the lobby handler', async () => {
+    loadConfig.mockReturnValue(normalizeConfig({ enabled: true }));
+    const message = createMessage({ content: 'hello' });
+
+    await handleMessageCreate(message);
+
+    expect(handleLobbyMessage).toHaveBeenCalledWith(message);
+  });
+
+  it('stops once the lobby handler has dealt with the message', async () => {
+    // A message that was just deleted is not worth scoring for spam.
+    loadConfig.mockReturnValue(normalizeConfig({ enabled: true }));
+    handleLobbyMessage.mockResolvedValue(true);
+
+    expect(await handleMessageCreate(createMessage({ content: 'hello' }))).toBeNull();
+    expect(enforcement.act).not.toHaveBeenCalled();
+  });
+
+  it('polices the lobby even while spam detection is switched off', async () => {
+    // The two features are unrelated; the lobby is tidied either way.
+    loadConfig.mockReturnValue(normalizeConfig({ enabled: false }));
+
+    await handleMessageCreate(createMessage({ content: 'hello' }));
+
+    expect(handleLobbyMessage).toHaveBeenCalled();
   });
 });

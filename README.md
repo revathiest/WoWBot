@@ -2,10 +2,12 @@
 
 A Discord bot that pulls World of Warcraft data from the **Blizzard Battle.net API** and returns it as slash commands. Character profiles, Mythic+ ratings, realm status, item lookups, and the WoW Token price.
 
-It also includes spam detection with automatic banning, modelled on trust tiers rather than a single
-threshold.
+It also posts a **weekly guild report** — roster changes, arena movement, and PvP activity, compared
+against last week — runs a **support ticket system**, and includes spam detection with automatic
+banning, modelled on trust tiers rather than a single threshold.
 
-Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no database.
+Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no database. A handful of small
+JSON files under `data/` hold settings and last week's snapshots; everything else is fetched live.
 
 ---
 
@@ -22,6 +24,10 @@ Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no databas
 | `/arena ladder \| rank` | Arena ladder standings for a bracket, or where one character ranks across 2v2, 3v3 and 5v5. |
 | `/guild <guild> [realm] [game] [region]` | Guild roster: size, faction, guild master, class and level spread, and max-level members. |
 | `/audit <character> [realm] [game] [region]` | Raid-readiness check — finds missing enchants on the slots TBC actually enchants. |
+| `/report status \| now \| post \| track \| untrack \| configure …` | The weekly guild report: track guilds, set the channel and schedule, and preview or post on demand. Requires Manage Server. |
+| `/iam add \| remove \| list \| forget` | Link your characters so reports mention you instead of just naming the character. Optional, and open to everyone. |
+| `/autokick status \| preview \| run \| configure …` | Removes members who never pick a role, after a reminder DM. Requires Manage Server. |
+| `/ticket set-channel \| set-archive \| roles \| status \| history` | Sets up the support ticket system and looks up past tickets. Requires Manage Server. |
 | `/spam status \| test \| configure …` | Inspect, dry-run, and tune spam detection. Requires Manage Server. |
 
 Every command takes an optional `region` (`US`, `EU`, `KR`, `TW`). All except `/mythicplus` also take an optional `game`. When omitted, `BLIZZARD_REGION` and `BLIZZARD_GAME` are used.
@@ -46,6 +52,183 @@ The `anniversary` static data is genuine TBC: 9 classes (no Death Knight), 10 ra
 Set `BLIZZARD_GAME` to the version your guild plays so nobody has to pass the option.
 
 > **Note on `/item`:** Blizzard's item search matches full names only — there is no substring or fuzzy search in the API. `Thunderfury` will not find `Thunderfury, Blessed Blade of the Windseeker`; pass the exact name or the item ID.
+
+---
+
+## Weekly reports
+
+Once a week the bot posts a report per tracked guild: who joined and left, who levelled up (and who
+finally hit the cap), rank promotions, arena movement across 2v2/3v3/5v5, and who racked up the most
+honorable kills. Two guilds in one Discord server is a normal setup — track both, and they either
+share a channel or get one each.
+
+### Setting it up
+
+```
+/report track guild:Apex realm:Nightslayer
+/report track guild:Second Guild realm:Nightslayer channel:#second-guild-news
+/report configure channel channel:#guild-news
+/report configure schedule day:Monday hour:18
+/report configure enabled value:true
+```
+
+`/report status` shows what is tracked, where each guild posts, and when the next report is due.
+
+- **Times are UTC.** There is no timezone option — `hour:18` means 18:00 UTC everywhere.
+- **The schedule is a slot, not a timer.** If the bot is offline at the scheduled hour it posts when
+  it comes back, and restarting a dozen times in an hour still produces exactly one report.
+- **Turning reports on does not fire one immediately**; it arms the next slot.
+
+### Seeing one early
+
+`/report now` builds the report and shows it to you **without posting it and without resetting the
+week** — safe to run whenever. `/report post` publishes for real and starts a new week from that
+moment.
+
+### The first report is a baseline
+
+Blizzard's API only ever reports *current* state: a season's total wins, a lifetime honorable-kill
+count, today's roster. Nothing is per-week. So the bot stores a snapshot each week and subtracts it
+from the next one — which means a newly tracked guild's first report is a starting position, and real
+week-over-week changes begin with the second. `/report status` says which guilds are still waiting
+for a baseline.
+
+### Getting mentioned by name
+
+By default a report names characters, because it is built from the guild roster and the bot has no
+idea who plays what. Anyone can change that for themselves:
+
+```
+/iam add character:Butud
+/iam list
+/iam remove character:Butud
+/iam forget
+```
+
+Linking is optional and open to everyone — reports work fine with nobody linked. A claimed character
+is verified against the API before it is stored, and a character already claimed by someone else is
+refused. `/iam forget` deletes everything the bot holds about you in one step; the file stores nothing
+but a Discord user id and the character names that person typed in.
+
+### What it costs
+
+A report is one roster call, three cached ladder calls, and one honorable-kill lookup per member —
+about 250 calls for a 240-member guild, finishing in under ten seconds. Well inside Blizzard's limit
+of 36,000 requests an hour.
+
+---
+
+## Auto-kicking members who never pick a role
+
+New members who have not selected any role within a week are reminded by DM, then removed. Both
+timings are configurable, and nothing happens until you switch it on.
+
+```
+/autokick configure alert-channel channel:#mod-log
+/autokick configure role-channel channel:#pick-your-roles
+/autokick preview
+/autokick configure enabled value:true
+```
+
+### It cannot kick anyone who is already here
+
+The moment you switch it on, the bot stamps a cutoff. **Anyone who was already in the server at that
+instant is permanently exempt**, however long they have gone without a role. Only members who join
+afterwards are ever removed. `/autokick status` shows the cutoff, and `/autokick preview` tells you how
+many existing members it is protecting — which is usually why a first preview looks emptier than
+expected.
+
+Switching the feature off and on again re-stamps the cutoff, granting an amnesty to anyone who joined
+in between. That direction is deliberate: re-enabling can surprise you by doing nothing, never by
+removing somebody you did not expect.
+
+### What actually happens
+
+| Day | What the member gets |
+| --- | --- |
+| 0 | Joins. Nothing happens. |
+| 5 (configurable) | A DM: pick your roles, here is where, you have N days left. |
+| 7 (configurable) | A DM explaining the removal, then the kick. |
+
+The reminder DM is always sent **before** the kick, because Discord will not deliver a message to
+someone you no longer share a server with. Many people have DMs closed — the removal goes ahead
+either way, and the audit channel records that the DM did not land.
+
+A kick is not a ban. Removed members can rejoin at any time with an invite.
+
+### Safety rails
+
+- **Ships disabled**, and cannot be enabled without an audit channel — with no database, that channel
+  is the only record of who was removed and why.
+- **`/autokick preview` changes nothing** and shows exactly who is at risk and how long each person
+  has left. Run it before enabling, and any time after.
+- **A manual `/autokick run` requires `confirm:true`.**
+- **At most 10 members are removed per sweep.** If more are due, the rest wait for the next pass and
+  the audit channel says so. A misconfiguration costs a handful of people and raises a flag rather
+  than clearing the server.
+- **Bots, anyone holding any role, and the server owner are never touched.** Neither is anyone the
+  bot cannot act on due to role hierarchy — those are reported in the audit channel instead of
+  failing silently.
+- **Missing data never causes a kick.** If the member list cannot be read, the sweep does nothing at
+  all rather than assuming nobody has roles.
+
+The sweep runs every ten minutes, so a removal lands shortly after the deadline passes rather than
+exactly on it.
+
+---
+
+## Support tickets
+
+Members press a button in a lobby channel, describe their problem in a form, and get a private channel
+with the moderators. Moderators claim it, answer, and close it — at which point the channel is locked
+and moved to an archive category.
+
+```
+/ticket set-channel channel:#support archive_category:Closed Tickets
+/ticket roles add role:@Moderator
+/ticket status
+```
+
+That posts the panel with the **Open Ticket** button. The panel is re-posted automatically every time
+the bot starts, so deleting it or purging the channel cannot leave a dead button behind.
+
+### The flow
+
+| Step | What happens |
+| --- | --- |
+| Member presses **Open Ticket** | A form asks what they need help with (10–400 characters). |
+| They submit it | A private `ticket-name-12` channel is created, visible only to them, the bot, and the moderator roles. The opener and those roles are pinged once. |
+| A moderator presses **Claim** | The button locks and shows who took it, so two people do not both answer. |
+| A moderator presses **Close** | The opener loses access, moderators keep read access, and the channel moves to the archive category. |
+
+Moderator roles are set with `/ticket roles add`. Until at least one is configured, anyone with Manage
+Channels can claim and close; **Manage Server always works regardless**.
+
+`/ticket history` shows recent tickets, or one member's, with who opened, claimed and closed each.
+
+### Differences from the Squadron 42 bot
+
+This was ported from that bot's ticket module. The behaviour is the same; four things were fixed on the
+way over:
+
+- **The lobby channel no longer has to live inside a category.** The original refuses to create a
+  ticket when it does not, which breaks the system with no obvious cause.
+- **A failed channel creation no longer leaves a phantom ticket.** The original records the ticket
+  first, so a permissions problem leaves a ticket that exists in the database and nowhere else.
+- **Adding a moderator role no longer locks out admins.** In the original, the permission fallback
+  applies *only* while no roles are configured.
+- **There is a limit of 3 open tickets per person.** Each one is a real channel, and the original has
+  no limit.
+
+Storage is the other difference: Squadron 42 keeps tickets in MySQL, and this bot has no database, so
+they live in `data/tickets.json` alongside the other settings. Closed tickets are kept as history, up
+to a cap of 1,000.
+
+### Lobby policing
+
+By default the lobby channel is kept clear: a message from a non-moderator is deleted and the sender is
+told why by DM (or by a short-lived reply if their DMs are closed). Turn it off with
+`/ticket lobby-policing value:false`.
 
 ---
 
@@ -158,6 +341,9 @@ utils/blizzard/profile.js    Character endpoints (profile-{region} namespace)
 utils/blizzard/gameData.js   Realm, token, and item endpoints
 utils/blizzard/realms.js     Cached realm index, resolution, and search
 utils/commandRegistration.js Recursive command loader + Discord registration
+utils/onboarding/            Auto-kick sweep: config, classification, DMs, alerts, scheduling
+utils/tickets/               Support tickets: store, embeds and buttons, create/claim/close flow
+utils/reports/               Weekly report: config, collection, diffing, rendering, scheduling
 utils/wow.js                 Slugs, colours, and formatting helpers
 __tests__/                   Jest suites mirroring the source layout
 ```
@@ -191,6 +377,10 @@ Throw from `execute` and the interaction handler will translate it into a sensib
 - **`/audit` checks enchants, not gems.** Blizzard exposes gems that are socketed but never the socket list — `sockets` is absent from equipped items and null on the item document — so an empty socket cannot be told apart from an item with no sockets. The audit also only flags slots TBC can actually enchant; neck, waist, trinkets, shirt and tabard are skipped, as is a relic in the ranged slot.
 
 - **Arena ladders are cached for 10 minutes.** A single TBC bracket returns around 5,000 entries and finding one character means scanning the whole list, so repeated `/arena rank` lookups reuse the cached ladder. The season id is resolved from the API, never hardcoded.
+
+- **A 404 from a character's PvP summary is normal.** In a real 240-member guild, 23 members had no `pvp-summary` at all — bank alts parked at level 1, plus characters whose profile Blizzard has not published. The weekly report counts those as "no data" rather than errors, and only warns about genuine failures like rate limits.
+
+- **Guild rosters give a class ID, not a class name.** On Anniversary, roster entries carry `playable_class.id` with no `name`, so class names have to be resolved through the playable-class index. (Direct character profiles *do* include the name — it is only the roster payload that omits it.)
 
 - **Guild names have no index to resolve against**, unlike realms. The slug is derived with the same rule realms use, so a guild must be spelled as it appears in game; a miss reports the slug it tried rather than guessing again.
 

@@ -8,6 +8,7 @@ const state = require('../utils/spam/state');
 const enforcement = require('../utils/spam/enforcement');
 const { buildAlertEmbed, sendAlert } = require('../utils/spam/alert');
 const { loadConfig } = require('../utils/spam/config');
+const { handleLobbyMessage } = require('../utils/tickets/core');
 const { isGuildInScope } = require('../utils/guildScope');
 const { readConfig } = require('../config');
 
@@ -90,6 +91,18 @@ async function enforce({ message, member, decision, tier, signals, client }) {
 
 /** New messages: every signal, including the rate and repetition windows. */
 async function handleMessageCreate(message) {
+  // The ticket lobby is a button, not a chat room. This runs before spam
+  // detection and independently of it: policing the lobby has nothing to do
+  // with whether moderation is switched on, and a message that has just been
+  // deleted is not worth scoring.
+  if (
+    message?.guild &&
+    isGuildInScope(message.guild.id, readConfig().discord.guildId) &&
+    (await handleLobbyMessage(message))
+  ) {
+    return null;
+  }
+
   const config = loadConfig();
 
   const exemption = exemptionFor(message, config);

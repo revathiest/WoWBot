@@ -1,4 +1,7 @@
+jest.mock('../../utils/tickets/core', () => ({ handleComponent: jest.fn(async () => true) }));
+
 const { MessageFlags } = require('discord.js');
+const { handleComponent } = require('../../utils/tickets/core');
 const {
   describeError,
   describeDeadInteraction,
@@ -330,5 +333,88 @@ describe('guild scoping', () => {
     await handleInteraction(interaction);
 
     expect(execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('component routing', () => {
+  /** A button interaction, which is neither a command nor ignorable. */
+  function componentInteraction({ customId = 'ticket:create', kind = 'button' } = {}) {
+    const interaction = createInteraction();
+
+    interaction.customId = customId;
+    interaction.isChatInputCommand = () => false;
+    interaction.isButton = () => kind === 'button';
+    interaction.isModalSubmit = () => kind === 'modal';
+
+    return interaction;
+  }
+
+  beforeEach(() => {
+    handleComponent.mockClear();
+    handleComponent.mockResolvedValue(true);
+  });
+
+  it('routes a button to the component handlers', async () => {
+    const interaction = componentInteraction();
+    await handleInteraction(interaction);
+
+    expect(handleComponent).toHaveBeenCalledWith(interaction);
+  });
+
+  it('routes a modal submission too', async () => {
+    const interaction = componentInteraction({ customId: 'ticket:modal:create', kind: 'modal' });
+    await handleInteraction(interaction);
+
+    expect(handleComponent).toHaveBeenCalledWith(interaction);
+  });
+
+  it('never looks a component up as a slash command', async () => {
+    const execute = jest.fn();
+    const interaction = componentInteraction();
+    interaction.client.commands = new Map([['ticket:create', { execute }]]);
+
+    await handleInteraction(interaction);
+
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('turns a component failure into a reply rather than a silent hang', async () => {
+    handleComponent.mockRejectedValue(new Error('boom'));
+    const interaction = componentInteraction();
+
+    await handleInteraction(interaction);
+
+    expect(interaction.reply).toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('logs one line for a dead component interaction instead of a stack trace', async () => {
+    handleComponent.mockRejectedValue(Object.assign(new Error('gone'), { code: 10062 }));
+    const interaction = componentInteraction();
+
+    await handleInteraction(interaction);
+
+    expect(console.warn).toHaveBeenCalled();
+    expect(interaction.reply).not.toHaveBeenCalled();
+  });
+
+  it('ignores a component from a guild this instance does not serve', async () => {
+    // Buttons need the same GUILD_ID pinning as commands, or two instances both
+    // answer one click. A blank GUILD_ID serves every guild, so pin it here.
+    const previous = process.env.GUILD_ID;
+    process.env.GUILD_ID = 'pinned-guild';
+    resetIgnoredGuilds();
+
+    try {
+      const interaction = componentInteraction();
+      interaction.guildId = 'some-other-guild';
+
+      await handleInteraction(interaction);
+
+      expect(handleComponent).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.GUILD_ID;
+      else process.env.GUILD_ID = previous;
+    }
   });
 });

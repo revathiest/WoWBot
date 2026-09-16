@@ -9,7 +9,13 @@ const { registerCommands, registerGuildJoinHandler } = require('./utils/commandR
 const { registerInteractionHandler } = require('./handlers/interactionHandler');
 const { registerMessageHandler } = require('./handlers/messageHandler');
 const { loadConfig: loadSpamConfig } = require('./utils/spam/config');
-const { describeGuilds, guildScopeWarnings } = require('./utils/guildScope');
+const { loadConfig: loadReportConfig, DAYS } = require('./utils/reports/config');
+const { startReportScheduler, nextSlotAt } = require('./utils/reports/scheduler');
+const { loadConfig: loadOnboardingConfig } = require('./utils/onboarding/config');
+const { startOnboardingSweeper } = require('./utils/onboarding/sweep');
+const ticketStore = require('./utils/tickets/store');
+const { ensureLobbyMessage } = require('./utils/tickets/core');
+const { describeGuilds, guildScopeWarnings, isGuildInScope } = require('./utils/guildScope');
 
 const config = readConfig();
 const problems = validateConfig(config);
@@ -63,6 +69,50 @@ client.once(Events.ClientReady, async readyClient => {
   );
   if (spam.enabled && !spam.alertChannelId) {
     console.warn('⚠️  Spam detection is on but no alert channel is set; enforcement will be silent.');
+  }
+
+  const reports = loadReportConfig();
+  if (reports.enabled && reports.guilds.length > 0) {
+    const when = `${DAYS[reports.dayOfWeek]} ${String(reports.hour).padStart(2, '0')}:00 UTC`;
+    console.log(
+      `   Weekly reports: 📊 ${reports.guilds.length} guild(s), ${when} ` +
+        `(next ${new Date(nextSlotAt(reports)).toUTCString()})`
+    );
+  } else {
+    console.log('   Weekly reports: ⚪ off — /report track, then /report configure enabled value:true');
+  }
+
+  // Started unconditionally: it is a cheap five-minute tick that does nothing
+  // until reporting is switched on, so /report configure takes effect without a
+  // restart.
+  startReportScheduler(readyClient);
+
+  const onboarding = loadOnboardingConfig();
+  if (onboarding.enabled) {
+    console.log(
+      `   Onboarding sweep: 🧹 on — ${onboarding.graceDays}d grace, reminder at ` +
+        `${onboarding.warnAfterDays}d${onboarding.alertChannelId ? '' : ', NO audit channel'}`
+    );
+  } else {
+    console.log('   Onboarding sweep: ⚪ off — /autokick preview, then /autokick configure enabled value:true');
+  }
+
+  // Same reasoning as the report scheduler: a cheap tick that no-ops until the
+  // feature is switched on.
+  startOnboardingSweeper(readyClient);
+
+  // The lobby panel is a real message that can be deleted, purged, or lost when
+  // a channel is recreated. Re-posting it at startup means the Open Ticket
+  // button is never quietly dead.
+  const ticketGuilds = Object.keys(ticketStore.load().settings).filter(guildId =>
+    isGuildInScope(guildId, config.discord.guildId)
+  );
+
+  if (ticketGuilds.length > 0) {
+    await Promise.allSettled(ticketGuilds.map(guildId => ensureLobbyMessage(readyClient, guildId)));
+    console.log(`   Tickets: 🎫 lobby ready in ${ticketGuilds.length} guild(s)`);
+  } else {
+    console.log('   Tickets: ⚪ not set up — /ticket set-channel channel:#support');
   }
 
   await registerCommands(readyClient, { config });

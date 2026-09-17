@@ -19,6 +19,15 @@ const CONFIG_PATH = path.join(DATA_DIR, 'reports.json');
 // Sunday-first, matching JavaScript's getUTCDay().
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+/**
+ * How often the report posts.
+ *
+ * Daily by default, because the report channel is cleared before each post —
+ * a week-old report that nobody can scroll back to is worth less than a fresh
+ * one every morning. `dayOfWeek` is read only when this is `weekly`.
+ */
+const FREQUENCIES = ['daily', 'weekly'];
+
 // A roster plus a honorable-kill lookup per member is a few hundred API calls
 // per guild. That is fine weekly and fine on demand, but it is not something to
 // let grow without a ceiling.
@@ -27,8 +36,12 @@ const MAX_TRACKED_GUILDS = 10;
 const DEFAULTS = {
   enabled: false, // ships off; an admin turns it on once a channel is set
   channelId: null,
-  dayOfWeek: 1, // Monday
+  frequency: 'daily',
+  dayOfWeek: 1, // Monday — only used when frequency is 'weekly'
   hour: 18, // UTC — see the note on scheduling in scheduler.js
+  // Wipe the bot's previous reports before posting, so the channel always shows
+  // the current one and nothing else.
+  clearChannel: true,
   lastPostedAt: null,
   guilds: []
 };
@@ -105,14 +118,21 @@ function normalizeGuilds(value, config = readConfig()) {
   return guilds;
 }
 
+function normalizeFrequency(value) {
+  const frequency = String(value ?? '').trim().toLowerCase();
+  return FREQUENCIES.includes(frequency) ? frequency : DEFAULTS.frequency;
+}
+
 function normalizeConfig(raw = {}, config = readConfig()) {
   const source = raw && typeof raw === 'object' ? raw : {};
 
   return {
     enabled: Boolean(source.enabled),
     channelId: normalizeId(source.channelId),
+    frequency: normalizeFrequency(source.frequency),
     dayOfWeek: clampInt(source.dayOfWeek, { min: 0, max: 6, fallback: DEFAULTS.dayOfWeek }),
     hour: clampInt(source.hour, { min: 0, max: 23, fallback: DEFAULTS.hour }),
+    clearChannel: source.clearChannel === undefined ? DEFAULTS.clearChannel : Boolean(source.clearChannel),
     lastPostedAt: normalizeTimestamp(source.lastPostedAt),
     guilds: normalizeGuilds(source.guilds, config)
   };
@@ -222,6 +242,7 @@ module.exports = {
   CONFIG_PATH,
   DATA_DIR,
   DAYS,
+  FREQUENCIES,
   DEFAULTS,
   MAX_TRACKED_GUILDS,
   channelFor,

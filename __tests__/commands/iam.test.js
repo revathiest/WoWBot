@@ -23,8 +23,21 @@ const { createInteraction } = require('../helpers/interaction');
 
 const BUTUD = { name: 'Butud', realm: 'Nightslayer', region: 'us', game: 'anniversary' };
 
-function interaction({ subcommand, options = {}, user = { id: 'user-1' } } = {}) {
-  return createInteraction({ commandName: 'iam', subcommand, options, user });
+function interaction({
+  subcommand,
+  subcommandGroup = null,
+  options = {},
+  user = { id: 'user-1' },
+  permissions = true
+} = {}) {
+  return createInteraction({
+    commandName: 'iam',
+    subcommand,
+    subcommandGroup,
+    options,
+    user,
+    permissions
+  });
 }
 
 function payloadOf(fake) {
@@ -54,12 +67,13 @@ describe('command shape', () => {
     expect(command.data.toJSON().default_member_permissions).toBeUndefined();
   });
 
-  it('offers add, remove, list, and forget', () => {
+  it('offers add, remove, list, forget, and the admin manage group', () => {
     expect(command.data.toJSON().options.map(option => option.name)).toEqual([
       'add',
       'remove',
       'list',
-      'forget'
+      'forget',
+      'manage'
     ]);
   });
 });
@@ -71,14 +85,22 @@ describe('/iam add', () => {
     await command.execute(fake);
 
     expect(getCharacterProfile).toHaveBeenCalledWith('nightslayer', 'Butud', expect.any(Object));
-    expect(linkCharacter).toHaveBeenCalledWith('user-1', expect.objectContaining({ name: 'Butud' }));
+    expect(linkCharacter).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ name: 'Butud' }),
+      { force: false }
+    );
   });
 
   it('stores Blizzard\'s casing rather than what was typed', async () => {
     const fake = interaction({ subcommand: 'add', options: { character: 'bUtUd' } });
     await command.execute(fake);
 
-    expect(linkCharacter).toHaveBeenCalledWith('user-1', expect.objectContaining({ name: 'Butud' }));
+    expect(linkCharacter).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ name: 'Butud' }),
+      { force: false }
+    );
   });
 
   it('replies only to the person running it', async () => {
@@ -210,5 +232,94 @@ describe('buildListEmbed', () => {
 describe('characterLine', () => {
   it('names the game version, so alts across versions are distinguishable', () => {
     expect(command.characterLine(BUTUD)).toContain('TBC Anniversary');
+  });
+});
+
+describe('/iam manage', () => {
+  it('refuses a member without Manage Server, and points at the self-service command', async () => {
+    const fake = interaction({
+      subcommand: 'assign',
+      subcommandGroup: 'manage',
+      permissions: false,
+      options: { user: { id: 'user-9' }, character: 'Butud' }
+    });
+
+    await command.execute(fake);
+
+    expect(linkCharacter).not.toHaveBeenCalled();
+    expect(said(fake)).toContain('/iam add');
+  });
+
+  it('assigns a character to somebody else', async () => {
+    const fake = interaction({
+      subcommand: 'assign',
+      subcommandGroup: 'manage',
+      options: { user: { id: 'user-9' }, character: 'Butud' }
+    });
+
+    await command.execute(fake);
+
+    expect(linkCharacter).toHaveBeenCalledWith(
+      'user-9',
+      expect.objectContaining({ name: 'Butud' }),
+      { force: true }
+    );
+    expect(said(fake)).toContain('<@user-9>');
+  });
+
+  it('verifies the character exists before assigning it', async () => {
+    getCharacterProfile.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
+
+    const fake = interaction({
+      subcommand: 'assign',
+      subcommandGroup: 'manage',
+      options: { user: { id: 'user-9' }, character: 'Typo' }
+    });
+
+    await command.execute(fake);
+
+    expect(linkCharacter).not.toHaveBeenCalled();
+  });
+
+  it('says out loud when an assignment took the character off somebody', async () => {
+    linkCharacter.mockReturnValue({ linked: true, reason: null, movedFrom: 'user-2' });
+
+    const fake = interaction({
+      subcommand: 'assign',
+      subcommandGroup: 'manage',
+      options: { user: { id: 'user-9' }, character: 'Butud' }
+    });
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('<@user-2>');
+    expect(said(fake)).toContain('moved');
+  });
+
+  it('unassigns a character from somebody else', async () => {
+    const fake = interaction({
+      subcommand: 'unassign',
+      subcommandGroup: 'manage',
+      options: { user: { id: 'user-9' }, character: 'Butud' }
+    });
+
+    await command.execute(fake);
+
+    expect(unlinkCharacter).toHaveBeenCalledWith('user-9', { name: 'Butud', realm: null });
+    expect(said(fake)).toContain('<@user-9>');
+  });
+
+  it('reports a character that member never had', async () => {
+    unlinkCharacter.mockReturnValue({ removed: false, characters: [] });
+
+    const fake = interaction({
+      subcommand: 'unassign',
+      subcommandGroup: 'manage',
+      options: { user: { id: 'user-9' }, character: 'Nobody' }
+    });
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('not linked to <@user-9>');
   });
 });

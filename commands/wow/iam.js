@@ -8,7 +8,12 @@
 // this command needs no permissions and why `forget` deletes everything in one
 // step — see the note at the top of utils/reports/links.js.
 
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  MessageFlags,
+  PermissionFlagsBits
+} = require('discord.js');
 
 const {
   MAX_CHARACTERS_PER_USER,
@@ -67,7 +72,43 @@ const data = new SlashCommandBuilder()
   )
   .addSubcommand(sub =>
     sub.setName('forget').setDescription('Delete everything the bot stores about you.')
-  );
+  )
+  .addSubcommandGroup(group => {
+    group
+      .setName('manage')
+      .setDescription('Assign characters on behalf of a member. Requires Manage Server.')
+      .addSubcommand(sub => {
+        sub
+          .setName('assign')
+          .setDescription('Link a character to a member.')
+          .addUserOption(option =>
+            option.setName('user').setDescription('Who owns the character.').setRequired(true)
+          )
+          .addStringOption(option =>
+            option.setName('character').setDescription('Character name.').setRequired(true)
+          );
+        addRealmOption(sub);
+        addGameOption(sub);
+        addRegionOption(sub);
+        return sub;
+      })
+      .addSubcommand(sub =>
+        sub
+          .setName('unassign')
+          .setDescription('Unlink a character from a member.')
+          .addUserOption(option =>
+            option.setName('user').setDescription('Whose character to unlink.').setRequired(true)
+          )
+          .addStringOption(option =>
+            option.setName('character').setDescription('Character name.').setRequired(true)
+          )
+          .addStringOption(option =>
+            option.setName('realm').setDescription('Realm, if the name is linked twice.')
+          )
+      );
+
+    return group;
+  });
 
 function characterLine(character) {
   const version = GAME_VERSIONS[character.game]?.label ?? character.game;
@@ -97,8 +138,11 @@ function buildListEmbed(userId, characters) {
  * The check is one API call and prevents a typo from sitting in the link file
  * forever, silently never matching a roster.
  */
-async function add(interaction) {
+async function add(interaction, { targetId = interaction.user.id, force = false } = {}) {
   const scope = resolveScope(interaction);
+  // Reused for /iam manage assign, where the character belongs to somebody
+  // other than whoever ran the command.
+  const self = targetId === interaction.user.id;
   const characterName = interaction.options.getString('character');
   const realm = resolveRealmName(interaction);
 
@@ -128,30 +172,48 @@ async function add(interaction) {
     throw err;
   }
 
-  const { linked, reason, claimedBy } = linkCharacter(interaction.user.id, {
-    // Store Blizzard's casing rather than whatever was typed.
-    name: profile.name ?? characterName,
-    realm: target.name || realm,
-    region: scope.region,
-    game: scope.game
-  });
+  const { linked, reason, claimedBy, movedFrom } = linkCharacter(
+    targetId,
+    {
+      // Store Blizzard's casing rather than whatever was typed.
+      name: profile.name ?? characterName,
+      realm: target.name || realm,
+      region: scope.region,
+      game: scope.game
+    },
+    { force }
+  );
 
   if (linked) {
+    const lines = [`✅ **${profile.name}** · ${target.name || realm} is linked to <@${targetId}>.`];
+
+    if (movedFrom) {
+      // Never let a reassignment happen silently — somebody just lost a claim.
+      lines.push(`⚠️ It was previously linked to <@${movedFrom}>, and has been moved.`);
+    }
+
+    lines.push(
+      self
+        ? 'Weekly reports will mention you when this character does something worth reporting.'
+        : 'Weekly reports will mention them when this character does something worth reporting.'
+    );
+
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(classColor(profile.character_class?.name))
-          .setDescription(
-            `✅ **${profile.name}** · ${target.name || realm} is linked to <@${interaction.user.id}>.\n` +
-              'Weekly reports will mention you when this character does something worth reporting.'
-          )
+          .setDescription(lines.join('\n'))
       ]
     });
     return;
   }
 
   if (reason === 'duplicate') {
-    await interaction.editReply(`⚠️ **${characterName}** is already linked to you.`);
+    await interaction.editReply(
+      self
+        ? `⚠️ **${characterName}** is already linked to you.`
+        : `⚠️ **${characterName}** is already linked to <@${targetId}>.`
+    );
     return;
   }
 
@@ -165,8 +227,11 @@ async function add(interaction) {
 
   if (reason === 'full') {
     await interaction.editReply(
-      `❌ You have linked the maximum of ${MAX_CHARACTERS_PER_USER} characters. ` +
-        'Remove one first with `/iam remove`.'
+      self
+        ? `❌ You have linked the maximum of ${MAX_CHARACTERS_PER_USER} characters. ` +
+          'Remove one first with `/iam remove`.'
+        : `❌ <@${targetId}> already has the maximum of ${MAX_CHARACTERS_PER_USER} linked ` +
+          'characters. Unlink one first with `/iam manage unassign`.'
     );
     return;
   }
@@ -174,19 +239,61 @@ async function add(interaction) {
   await interaction.editReply('❌ That character could not be linked.');
 }
 
-function remove(interaction) {
+function remove(interaction, { targetId = interaction.user.id } = {}) {
   const characterName = interaction.options.getString('character');
   const realm = interaction.options.getString('realm');
+  const self = targetId === interaction.user.id;
 
-  const { removed } = unlinkCharacter(interaction.user.id, { name: characterName, realm });
+  const { removed } = unlinkCharacter(targetId, { name: characterName, realm });
 
-  return removed
-    ? `✅ **${characterName}** is no longer linked to you.`
-    : `⚠️ **${characterName}** is not linked to you. \`/iam list\` shows what is.`;
+  if (removed) {
+    return self
+      ? `✅ **${characterName}** is no longer linked to you.`
+      : `✅ **${characterName}** is no longer linked to <@${targetId}>.`;
+  }
+
+  return self
+    ? `⚠️ **${characterName}** is not linked to you. \`/iam list\` shows what is.`
+    : `⚠️ **${characterName}** is not linked to <@${targetId}>. ` +
+      '`/iam list user:@them` shows what is.';
+}
+
+/** Assigning on somebody's behalf is a moderator action, not a self-service one. */
+function isAdmin(interaction) {
+  return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
 }
 
 async function execute(interaction) {
+  const group = interaction.options.getSubcommandGroup(false);
   const subcommand = interaction.options.getSubcommand();
+
+  if (group === 'manage') {
+    if (!isAdmin(interaction)) {
+      await interaction.reply({
+        content:
+          '❌ You need the Manage Server permission to assign characters to other members. ' +
+          'Use `/iam add` to claim your own.',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const target = interaction.options.getUser('user');
+
+    if (subcommand === 'assign') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      // Forced: an admin assigning a character is usually settling exactly the
+      // dispute that would otherwise be refused.
+      await add(interaction, { targetId: target.id, force: true });
+      return;
+    }
+
+    await interaction.reply({
+      content: remove(interaction, { targetId: target.id }),
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
 
   if (subcommand === 'add') {
     // A realm resolve plus a character lookup can exceed Discord's three-second

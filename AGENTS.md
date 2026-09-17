@@ -12,7 +12,9 @@ Conventions for anyone — human or agent — working in this repository.
   - `onboarding.json` — settings for the auto-kick sweep, including the cutoff instant that protects existing members.
   - `onboarding-warned.json` — who has already had the "pick a role" reminder DM, so a restarting bot does not DM the same person repeatedly. Self-prunes every sweep.
   - `tickets.json` — ticket lobby settings, moderator roles, open tickets, and closed-ticket history. Replaces the three MySQL tables the ticket system used in the bot it was ported from.
-  - `links.json` — Discord user id → the characters that person claimed with `/iam`. **This is the only user data the bot stores**, it is volunteered rather than harvested, it holds nothing but an id and character names, and `/iam forget` deletes a user's entry outright. Keep it that way: do not add display names, activity, or anything the user did not type in themselves.
+  - `help.json` — which channel the help post lives in, and the ids of the messages that make it up.
+  - `audit.json` — the audit log channel and how much to record.
+  - `links.json` — Discord user id → the characters that person claimed with `/iam`, or that an admin assigned with `/iam manage assign`. **This is the only user data the bot stores**, it is volunteered rather than harvested, it holds nothing but an id and character names, and `/iam forget` deletes a user's entry outright. Keep it that way: do not add display names, activity, or anything the user did not type in themselves.
 
   Do not add another store without a very good reason.
 - **Privileged intents: `MessageContent` and `GuildMembers` are enabled, for spam detection only.** They must be switched on in the Discord Developer Portal or login fails. Do not add further privileged intents, and do not use these two for anything beyond moderation.
@@ -86,7 +88,10 @@ Keep these boundaries — the tests rely on them for mocking:
 - **A 404 from `pvp-summary` is normal, not a failure.** Measured against a real 240-member guild, 23 members had no PvP summary: bank alts parked at level 1, plus characters whose profile Blizzard has not published. `collectKills` counts those separately from real errors. Reporting them as failures would put a warning on every report and teach people to ignore it.
 - **Guild rosters carry a class ID, not a class name.** On Anniversary, `playable_class.name` is absent from roster entries — only `id` is there — so anything printing a class must resolve ids through `getPlayableClassIndex`. (The class breakdown in `/guild` predates this and is empty on Anniversary for exactly this reason.)
 - **Ladders are scanned per bracket, never per character.** There is no per-character ladder endpoint, and one bracket is ~5,000 entries, so three cached list scans beat hundreds of requests for a 240-member guild.
-- **The schedule is a weekly slot, not a timer.** Each tick asks "has the most recent slot passed without a post since?". That is what makes an offline bot report late rather than never, and a restarting bot report once rather than every five minutes.
+- **The schedule is a slot, not a timer.** Each tick asks "has the most recent slot passed without a post since?". That is what makes an offline bot report late rather than never, and a restarting bot report once rather than every five minutes. `frequency` picks the cycle length; `dayOfWeek` is read only when it is `weekly`.
+- **Clearing the channel only ever deletes the bot's own messages.** "Clear the channel" means "show only the current report", and a report channel is dedicated, so in practice that is everything in it — but scoping it this way means a misconfigured channel costs nobody their conversation. `bulkDelete` cannot touch anything over fourteen days old, so older messages are deleted singly.
+- **The report carries counts, the button carries names.** Two hundred names would bury the rest of the report, so the breakdown goes out as a DM on request. Components belong to a message rather than an embed, so when several guilds share a channel each gets its own button.
+- **"Not on Discord" is three states, not one** (`utils/reports/membership.js`): linked and present, linked but departed, and never linked. They need different follow-up, and `fetchPresentUserIds` returns null rather than an empty set on failure — an empty set would report the entire guild as having left.
 - **Times are UTC, and every surface says so.** A timezone library is a dependency this project does not take, and reading the host's local zone would silently shift everyone's report when the box moves.
 - **Posting is not an interaction, so `GUILD_ID` has to be checked by hand.** Nothing else stops a second instance sharing the token from double-posting; `publishReports` runs the channel's guild through `isGuildInScope` before sending.
 - **The level cap is derived from the roster, never hardcoded.** TBC is 70 today and Anniversary realms advance on Blizzard's schedule.
@@ -127,6 +132,34 @@ Other things worth keeping:
 - **The lobby panel is re-posted at startup.** It is an ordinary message and can be deleted or purged; without `ensureLobbyMessage` on ready, the Open Ticket button quietly stops existing.
 - **Closed-ticket history is capped** at `MAX_CLOSED_HISTORY`. Everything else in `data/` is settings; this is the one list that would otherwise grow forever.
 - **Close answers the interaction before rearranging the channel.** Editing permission overwrites and moving a channel between categories takes long enough to risk the interaction expiring first.
+
+## Locked channels
+
+Three channels are owned outright by the bot — the help post, the ticket lobby, and the audit log — and all of them go through `utils/channelLock.js`. It exists because Discord's permission resolution has a trap in it:
+
+- **Denying `SendMessages` on @everyone is not enough.** It beats a role's SERVER-level permissions, but it does NOT beat a role-specific overwrite on the same channel; those are applied afterwards and win. `postingRoleOverwrites` finds those roles and denies them too. A lock that skips this step looks applied and does nothing.
+- **`UseApplicationCommands` is denied deliberately.** A slash command run in the channel posts its reply there, burying the message the lock exists to keep visible.
+- **`visibility: 'admins'` hides the channel** instead of making it public, for the audit log. Roles with Manage Server are granted access explicitly — unlike Administrator, Manage Server does **not** bypass a `ViewChannel` denial, and a moderator role that cannot read the log is the obvious failure here.
+- **`unlockChannel` clears the allow list as well as the deny list**, or a hidden channel would come back unlocked and still invisible.
+- **Administrators bypass all of it.** No bot can prevent that. Every command that applies a lock says so in its reply; do not remove that line to make the output tidier.
+
+## Help post
+
+- **Generated from the loaded commands, never hand-maintained.** Every command exports `help` and `category`; the post is rebuilt from `client.commands` after registration on each startup, so it cannot describe a command the bot no longer has.
+- **One message per category, with jump links.** The header is posted first, the sections after, and then the header is edited a second time to add links — the section ids do not exist until they have been posted, so the table of contents is necessarily a second pass.
+- **Update in place, or replace wholesale — never patch.** Discord messages cannot be reordered, and a message sent now lands at the bottom. If any stored message is missing, or the number of sections has changed, the whole post is deleted and republished so the sections stay in order.
+- **There is deliberately no refresh command.** The post is checked on every boot, and a stored content fingerprint means an unchanged command set writes nothing at all. Without the fingerprint, every restart would rewrite every message and leave an edit on a post nobody touched. The fingerprint is computed WITHOUT the table of contents, whose links contain message ids that do not exist on the first pass.
+- **Admin commands are excluded from the posted version** (`forAudience` in content.js). The channel is public; a list of commands almost everyone reading it cannot run is noise. `/help show` includes them for members who can actually use them.
+- **`/help` carries no default-member-permissions flag**, because `/help show` is for everyone; the administrative subcommands check Manage Server in code.
+
+## Audit log
+
+- **Entries are buffered and flushed together.** Discord allows roughly five messages per five seconds per channel; one send per action would exhaust that during any burst and start dropping the very records the log exists to keep.
+- **Plain text lines, not embeds.** A log is read by scanning down it, and twenty embeds in a row is a wall of boxes.
+- **Mentions are rendered but suppressed** with `allowedMentions: { parse: [] }`. The log names people constantly; pinging them would make it unusable.
+- **Logging must never break the thing it is logging.** `record` never throws and never awaits the send; every failure is a `console.warn`.
+- **`verbosity: 'admin'` still records everything automatic.** An unprompted kick or a scheduled report is the whole point of having a log, so the filter only ever drops ordinary lookups.
+- This is separate from the spam and onboarding alert channels on purpose: those carry the full reasoning behind one decision, this is the flat chronological feed.
 
 ## Testing
 

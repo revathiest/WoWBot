@@ -2,9 +2,10 @@
 
 A Discord bot that pulls World of Warcraft data from the **Blizzard Battle.net API** and returns it as slash commands. Character profiles, Mythic+ ratings, realm status, item lookups, and the WoW Token price.
 
-It also posts a **weekly guild report** — roster changes, arena movement, and PvP activity, compared
-against last week — runs a **support ticket system**, and includes spam detection with automatic
-banning, modelled on trust tiers rather than a single threshold.
+It also posts a **daily guild report** — roster changes, arena movement, and PvP activity, compared
+against the previous one — runs a **support ticket system**, keeps a **self-updating help post**, records
+what it does to an **audit log**, and includes spam detection with automatic banning, modelled on
+trust tiers rather than a single threshold.
 
 Built with [discord.js](https://discord.js.org/) v14 on Node.js, with no database. A handful of small
 JSON files under `data/` hold settings and last week's snapshots; everything else is fetched live.
@@ -24,8 +25,11 @@ JSON files under `data/` hold settings and last week's snapshots; everything els
 | `/arena ladder \| rank` | Arena ladder standings for a bracket, or where one character ranks across 2v2, 3v3 and 5v5. |
 | `/guild <guild> [realm] [game] [region]` | Guild roster: size, faction, guild master, class and level spread, and max-level members. |
 | `/audit <character> [realm] [game] [region]` | Raid-readiness check — finds missing enchants on the slots TBC actually enchants. |
-| `/report status \| now \| post \| track \| untrack \| configure …` | The weekly guild report: track guilds, set the channel and schedule, and preview or post on demand. Requires Manage Server. |
+| `/report status \| now \| post \| track \| untrack \| configure …` | The guild report: track guilds, set the channel and schedule, and preview or post on demand. Requires Manage Server. |
 | `/iam add \| remove \| list \| forget` | Link your characters so reports mention you instead of just naming the character. Optional, and open to everyone. |
+| `/iam manage assign \| unassign` | Link a character to another member on their behalf. Requires Manage Server. |
+| `/help show \| setup \| unlock \| status` | Lists every command. `setup` posts them to a read-only channel. |
+| `/auditlog status \| channel \| enabled \| verbosity` | Records what the bot does to a hidden, admin-only channel. Requires Manage Server. |
 | `/autokick status \| preview \| run \| configure …` | Removes members who never pick a role, after a reminder DM. Requires Manage Server. |
 | `/ticket set-channel \| set-archive \| roles \| status \| history` | Sets up the support ticket system and looks up past tickets. Requires Manage Server. |
 | `/spam status \| test \| configure …` | Inspect, dry-run, and tune spam detection. Requires Manage Server. |
@@ -55,9 +59,9 @@ Set `BLIZZARD_GAME` to the version your guild plays so nobody has to pass the op
 
 ---
 
-## Weekly reports
+## Guild reports
 
-Once a week the bot posts a report per tracked guild: who joined and left, who levelled up (and who
+Once a day (or once a week) the bot posts a report per tracked guild: who joined and left, who levelled up (and who
 finally hit the cap), rank promotions, arena movement across 2v2/3v3/5v5, and who racked up the most
 honorable kills. Two guilds in one Discord server is a normal setup — track both, and they either
 share a channel or get one each.
@@ -68,9 +72,35 @@ share a channel or get one each.
 /report track guild:Apex realm:Nightslayer
 /report track guild:Second Guild realm:Nightslayer channel:#second-guild-news
 /report configure channel channel:#guild-news
-/report configure schedule day:Monday hour:18
+/report configure schedule hour:18
 /report configure enabled value:true
 ```
+
+### Daily, and the channel is cleared each time
+
+Reports post **daily** by default, and the bot deletes its own previous reports before posting
+the new one, so the channel only ever shows the current one. Messages from anyone else are left
+alone — pointing the report at a busy channel by mistake costs nobody their conversation.
+
+```
+/report configure schedule hour:18 frequency:weekly day:Monday
+/report configure clear-channel value:false
+```
+
+### Who is on Discord
+
+Each report carries two counts — **on Discord** and **not on Discord** — and a button that DMs
+you the full breakdown, so the report itself stays short. The breakdown splits three ways:
+
+| Group | Meaning |
+| --- | --- |
+| 🟢 On Discord | The character is linked, and that account is still in the server. |
+| 🚪 Left the server | The character is linked, but the account is gone. |
+| ⚪ Not linked | Nobody has claimed the character. |
+
+The last group is the honest limit of what the bot knows: it can only connect a character to an
+account when somebody claims it with `/iam add` or an admin assigns it with
+`/iam manage assign`, so anyone in that list may well be in the server without having done so.
 
 `/report status` shows what is tracked, where each guild posts, and when the next report is due.
 
@@ -88,9 +118,9 @@ moment.
 ### The first report is a baseline
 
 Blizzard's API only ever reports *current* state: a season's total wins, a lifetime honorable-kill
-count, today's roster. Nothing is per-week. So the bot stores a snapshot each week and subtracts it
+count, today's roster. None of it is per-period. So the bot stores a snapshot each run and subtracts it
 from the next one — which means a newly tracked guild's first report is a starting position, and real
-week-over-week changes begin with the second. `/report status` says which guilds are still waiting
+real change appears from the second onward. `/report status` says which guilds are still waiting
 for a baseline.
 
 ### Getting mentioned by name
@@ -109,6 +139,17 @@ Linking is optional and open to everyone — reports work fine with nobody linke
 is verified against the API before it is stored, and a character already claimed by someone else is
 refused. `/iam forget` deletes everything the bot holds about you in one step; the file stores nothing
 but a Discord user id and the character names that person typed in.
+
+Admins can do it on someone's behalf, which is useful for people who will never run the command
+themselves:
+
+```
+/iam manage assign user:@Ken character:Butud
+/iam manage unassign user:@Ken character:Butud
+```
+
+Unlike a member's own claim, an admin assignment **moves** a character that somebody else had already
+claimed — that is usually the dispute being settled — and says out loud who lost it.
 
 ### What it costs
 
@@ -232,6 +273,99 @@ told why by DM (or by a short-lived reply if their DMs are closed). Turn it off 
 
 ---
 
+## The help post
+
+`/help setup channel:#help` posts the command list to a channel and locks that channel down.
+
+```
+/help setup channel:#help
+```
+
+What you get is several posts: an overview with **jump links**, then one post per category (WoW
+lookups, Help, Admin). Long categories split across extra posts on their own, so it keeps working as
+commands are added.
+
+**It maintains itself, and there is no refresh command.** The content is generated from the commands
+the bot has actually loaded — every command already carries its own description and subcommand list —
+and it is checked on every startup. Add, rename, or remove a command and the post follows without
+anyone touching it.
+
+The check is cheap and does the least it can get away with:
+
+| Situation | What happens |
+| --- | --- |
+| Nothing changed | **Nothing is written.** The post carries a fingerprint of its own content, so an ordinary restart does not leave an edit on a post nobody touched. |
+| A command changed | The existing posts are edited in place, so links to them keep working. |
+| A section was added, removed, or a post was deleted | The whole post is republished. Discord messages cannot be reordered, so patching a hole would leave the sections out of order. |
+
+**Admin commands are left out of the posted version.** The channel is readable by the whole server,
+and a list of commands that answer "you need the Manage Server permission" is noise to nearly
+everyone reading it. Admins still see them in `/help show`.
+
+`/help show` gives anyone the same list privately — including the admin commands, if they can use
+them — and `/help show command:ticket` explains a single command.
+
+### Locked channels
+
+The help channel is set so **everyone can read it and only the bot can post**. The same lock is
+applied to the ticket lobby, so the Open Ticket button can never be pushed out of view.
+
+This includes denying slash commands in those channels — a command reply would bury the post it is
+meant to sit below.
+
+> ⚠️ **Members with the Administrator permission bypass channel permissions and can still post.** No
+> bot can prevent that. The commands say so when they apply a lock rather than promising a guarantee
+> that does not hold.
+
+`/help unlock channel:#help` reverses it. Note it *removes* the restrictions rather than granting
+anything, so the channel goes back to inheriting from its category and roles.
+
+---
+
+## Audit log
+
+A chronological record of what the bot did, written to a channel that is **hidden from everyone except
+admins**.
+
+```
+/auditlog channel channel:#bot-log
+/auditlog enabled value:true
+```
+
+Setting the channel hides it: `@everyone` loses sight of it, roles with Manage Server are granted read
+access explicitly, and only the bot can post. (Manage Server does not bypass a view denial the way
+Administrator does, which is why those roles are granted access rather than assumed.)
+
+Each line says when, who, what, and where:
+
+```
+9:04 PM ⌨️ @Ken ran /character in #general
+9:05 PM 🎫 @Sam opened ticket #12 in #ticket-sam-12
+9:06 PM 🔧 @Ken changed the audit log settings in #admin
+3:00 AM 📊 the bot posted the daily guild report — 2 guilds to 1 channel
+```
+
+### Verbosity
+
+| Level | What it records |
+| --- | --- |
+| `all` (default) | Every command and button, plus everything the bot does on its own. |
+| `admin` | Configuration and moderation only, plus everything automatic. Skips lookups like `/character`, which are most of the traffic. |
+| `off` | Nothing. |
+
+Anything the bot does **unprompted** — a weekly report, an onboarding sweep — is recorded at every
+level except `off`, since that is the part nobody else witnessed.
+
+Entries are batched and written every few seconds rather than one message per action. Discord allows
+about five messages per five seconds per channel, and a burst of activity would otherwise blow through
+that and start dropping the records. Logging never interferes with the action being logged: if the log
+channel is misconfigured, the bot warns in its console and carries on.
+
+Spam enforcement and the onboarding sweep keep their own detailed alert channels for reviewing a
+single decision; this is the flat feed of everything.
+
+---
+
 ## Setup
 
 ### 1. Create the Discord application
@@ -341,6 +475,9 @@ utils/blizzard/profile.js    Character endpoints (profile-{region} namespace)
 utils/blizzard/gameData.js   Realm, token, and item endpoints
 utils/blizzard/realms.js     Cached realm index, resolution, and search
 utils/commandRegistration.js Recursive command loader + Discord registration
+utils/audit/                 Audit log: config, buffered writer
+utils/channelLock.js         Making a channel bot-writable, publicly or admin-only
+utils/help/                  Help post: generated content, store, publishing
 utils/onboarding/            Auto-kick sweep: config, classification, DMs, alerts, scheduling
 utils/tickets/               Support tickets: store, embeds and buttons, create/claim/close flow
 utils/reports/               Weekly report: config, collection, diffing, rendering, scheduling

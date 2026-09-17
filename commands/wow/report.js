@@ -18,6 +18,7 @@ const {
 
 const {
   DAYS,
+  FREQUENCIES,
   MAX_TRACKED_GUILDS,
   channelFor,
   guildKey,
@@ -34,6 +35,11 @@ const { discordTimestamp, FALLBACK_COLOR } = require('../../utils/wow');
 const { readConfig, GAMES } = require('../../config');
 
 const DAY_CHOICES = DAYS.map((day, index) => ({ name: day, value: index }));
+
+const FREQUENCY_CHOICES = [
+  { name: 'Daily — the channel is cleared and reposted each day', value: 'daily' },
+  { name: 'Weekly — one report a week, on a chosen day', value: 'weekly' }
+];
 
 const data = new SlashCommandBuilder()
   .setName('report')
@@ -113,14 +119,7 @@ const data = new SlashCommandBuilder()
       .addSubcommand(sub =>
         sub
           .setName('schedule')
-          .setDescription('Which day and hour (UTC) the report posts.')
-          .addIntegerOption(option =>
-            option
-              .setName('day')
-              .setDescription('Day of the week.')
-              .addChoices(...DAY_CHOICES)
-              .setRequired(true)
-          )
+          .setDescription('How often, and at what hour (UTC), the report posts.')
           .addIntegerOption(option =>
             option
               .setName('hour')
@@ -129,8 +128,34 @@ const data = new SlashCommandBuilder()
               .setMaxValue(23)
               .setRequired(true)
           )
+          .addStringOption(option =>
+            option
+              .setName('frequency')
+              .setDescription('Daily (the default) or weekly.')
+              .addChoices(...FREQUENCY_CHOICES)
+          )
+          .addIntegerOption(option =>
+            option
+              .setName('day')
+              .setDescription('Day of the week. Only used when the frequency is weekly.')
+              .addChoices(...DAY_CHOICES)
+          )
+      )
+      .addSubcommand(sub =>
+        sub
+          .setName('clear-channel')
+          .setDescription('Wipe the bot\'s previous reports before posting a new one.')
+          .addBooleanOption(option =>
+            option.setName('value').setDescription('On or off.').setRequired(true)
+          )
       )
   );
+
+/** "Daily at 18:00 UTC" / "Monday at 18:00 UTC" */
+function describeSchedule(config) {
+  const at = `${String(config.hour).padStart(2, '0')}:00 UTC`;
+  return config.frequency === 'weekly' ? `**${DAYS[config.dayOfWeek]}** at **${at}**` : `**Daily** at **${at}**`;
+}
 
 /** "Apex · Nightslayer (US · TBC Anniversary) → #reports" */
 function describeGuild(guild, config) {
@@ -149,7 +174,7 @@ function buildStatusEmbed(config) {
     .setTitle('Weekly Reports')
     .setDescription(
       config.enabled
-        ? `🟢 Enabled — posting **${DAYS[config.dayOfWeek]}** at **${String(config.hour).padStart(2, '0')}:00 UTC**.`
+        ? `🟢 Enabled — posting ${describeSchedule(config)}.`
         : '⚪ Disabled — turn it on with `/report configure enabled value:true`.'
     );
 
@@ -169,6 +194,11 @@ function buildStatusEmbed(config) {
 
   const last = discordTimestamp(config.lastPostedAt, 'R');
   embed.addFields({ name: 'Last posted', value: last ?? '_never_', inline: true });
+  embed.addFields({
+    name: 'Clear before posting',
+    value: config.clearChannel ? 'yes — only the current report is left' : 'no',
+    inline: true
+  });
 
   if (config.enabled && config.guilds.length > 0) {
     const next = discordTimestamp(nextSlotAt(config), 'F');
@@ -357,13 +387,12 @@ function configure(subcommand, interaction) {
       return '❌ Set a channel first: `/report configure channel channel:#somewhere`.';
     }
 
-    // Arm for the NEXT slot rather than the one that already passed this week,
-    // so switching reports on does not immediately fire one.
+    // Arm for the NEXT slot rather than the one that already passed, so
+    // switching reports on does not immediately fire one.
     const next = saveConfig({ enabled: true, lastPostedAt: Date.now() });
 
     return (
-      `🟢 Weekly reports are on — ${DAYS[next.dayOfWeek]} at ` +
-      `${String(next.hour).padStart(2, '0')}:00 UTC. ` +
+      `🟢 Reports are on — ${describeSchedule(next)}. ` +
       `First one ${discordTimestamp(nextSlotAt(next), 'R')}.`
     );
   }
@@ -374,13 +403,28 @@ function configure(subcommand, interaction) {
     return `✅ Reports will post to <#${channel.id}> unless a guild overrides it.`;
   }
 
-  const dayOfWeek = interaction.options.getInteger('day');
+  if (subcommand === 'clear-channel') {
+    const value = interaction.options.getBoolean('value');
+    saveConfig({ clearChannel: value });
+
+    return value
+      ? '✅ The bot\'s previous reports will be deleted before each new one, so the channel ' +
+        'only ever shows the current report. Messages from anyone else are left alone.'
+      : '✅ Previous reports will be left in place.';
+  }
+
   const hour = interaction.options.getInteger('hour');
-  const next = saveConfig({ dayOfWeek, hour });
+  const frequency = interaction.options.getString('frequency');
+  const dayOfWeek = interaction.options.getInteger('day');
+
+  const next = saveConfig({
+    hour,
+    ...(frequency ? { frequency } : {}),
+    ...(dayOfWeek === null ? {} : { dayOfWeek })
+  });
 
   return (
-    `✅ Reports will post **${DAYS[next.dayOfWeek]}** at ` +
-    `**${String(next.hour).padStart(2, '0')}:00 UTC**. ` +
+    `✅ Reports will post ${describeSchedule(next)}. ` +
     `Next one ${discordTimestamp(nextSlotAt(next), 'R')}.`
   );
 }
@@ -433,9 +477,12 @@ async function execute(interaction) {
 module.exports = {
   data,
   help: 'Configures and previews the weekly guild report.',
-  category: 'WoW',
+  // Manage Server gated, so it belongs with the other admin commands in /help
+  // even though it lives under commands/wow/.
+  category: 'Admin',
   buildStatusEmbed,
   describeFailure,
+  describeSchedule,
   describeGuild,
   execute,
   nextSlotAt

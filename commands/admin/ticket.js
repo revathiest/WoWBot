@@ -16,6 +16,7 @@ const {
 const store = require('../../utils/tickets/store');
 const { ensureLobbyMessage } = require('../../utils/tickets/core');
 const { buildHistoryEmbed } = require('../../utils/tickets/ui');
+const { isLocked, lockChannel } = require('../../utils/channelLock');
 const { FALLBACK_COLOR } = require('../../utils/wow');
 
 const MAX_HISTORY = 15;
@@ -94,7 +95,7 @@ const data = new SlashCommandBuilder()
       .addSubcommand(sub => sub.setName('list').setDescription('Show the ticket moderator roles.'))
   );
 
-function buildStatusEmbed(guildId) {
+function buildStatusEmbed(guildId, channel = null) {
   const settings = store.getSettings(guildId);
   const roles = store.getRoles(guildId);
   const open = Object.values(store.load().open).filter(ticket => ticket.guildId === String(guildId));
@@ -116,7 +117,12 @@ function buildStatusEmbed(guildId) {
         value: settings.archiveCategoryId ? `<#${settings.archiveCategoryId}>` : '_not set_',
         inline: true
       },
-      { name: 'Lobby policing', value: settings.policeLobby ? 'on' : 'off', inline: true }
+      { name: 'Lobby policing', value: settings.policeLobby ? 'on' : 'off', inline: true },
+      {
+        name: 'Channel',
+        value: channel ? (isLocked(channel) ? '🔒 read-only' : '⚠️ writable') : 'unknown',
+        inline: true
+      }
     );
   }
 
@@ -156,6 +162,14 @@ async function setChannel(interaction) {
     ...(archive ? { archiveCategoryId: archive.id } : {})
   });
 
+  // Locked before the panel goes up, so nobody can slip a message in between
+  // the two. This is a stronger version of lobby policing: policing deletes
+  // stray messages after the fact, the lock stops them being sent at all.
+  const lock = await lockChannel(channel, {
+    botId: interaction.client.user.id,
+    reason: 'Ticket lobby: read-only'
+  });
+
   const message = await ensureLobbyMessage(interaction.client, interaction.guildId);
 
   if (!message) {
@@ -165,11 +179,38 @@ async function setChannel(interaction) {
     );
   }
 
-  return (
+  const lines = [
     `✅ Ticket lobby set to <#${channel.id}> and the panel posted.` +
-    (archive ? ` Closed tickets will be moved to <#${archive.id}>.` : '') +
-    '\nAdd the roles that should handle tickets with `/ticket roles add`.'
-  );
+      (archive ? ` Closed tickets will be moved to <#${archive.id}>.` : '')
+  ];
+
+  if (lock.ok) {
+    lines.push(
+      '🔒 The channel is read-only — everyone can see the panel and press the button, but only ' +
+        'the bot can post, so the panel cannot be pushed out of view.'
+    );
+
+    if (lock.clearedRoles.length > 0) {
+      lines.push(
+        `Also revoked posting from ${lock.clearedRoles.map(id => `<@&${id}>`).join(', ')}, which ` +
+          'had channel-specific permission to post.'
+      );
+    }
+
+    lines.push(
+      '_Administrators bypass channel permissions; lobby policing deletes anything that does ' +
+        'get through._'
+    );
+  } else {
+    lines.push(
+      `⚠️ The channel could **not** be locked — ${lock.reason}. Lobby policing will still delete ` +
+        'stray messages, but people can post there.'
+    );
+  }
+
+  lines.push('Add the roles that should handle tickets with `/ticket roles add`.');
+
+  return lines.join('\n');
 }
 
 function setArchive(interaction) {
@@ -227,8 +268,13 @@ async function execute(interaction) {
   }
 
   if (subcommand === 'status') {
+    const settings = store.getSettings(interaction.guildId);
+    const lobby = settings
+      ? await interaction.guild?.channels?.fetch(settings.channelId).catch(() => null)
+      : null;
+
     await interaction.reply({
-      embeds: [buildStatusEmbed(interaction.guildId)],
+      embeds: [buildStatusEmbed(interaction.guildId, lobby)],
       flags: MessageFlags.Ephemeral
     });
     return;

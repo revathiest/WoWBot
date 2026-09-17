@@ -1,10 +1,12 @@
 jest.mock('../../utils/tickets/store');
 jest.mock('../../utils/tickets/core');
+jest.mock('../../utils/channelLock');
 
 const { PermissionFlagsBits } = require('discord.js');
 
 const store = require('../../utils/tickets/store');
 const { ensureLobbyMessage } = require('../../utils/tickets/core');
+const { isLocked, lockChannel } = require('../../utils/channelLock');
 const command = require('../../commands/admin/ticket');
 const { createInteraction } = require('../helpers/interaction');
 
@@ -44,6 +46,8 @@ beforeEach(() => {
   store.addRole.mockReturnValue({ added: true });
   store.removeRole.mockReturnValue({ removed: true });
   ensureLobbyMessage.mockResolvedValue({ id: 'msg1' });
+  lockChannel.mockResolvedValue({ ok: true, clearedRoles: [], warnings: [] });
+  isLocked.mockReturnValue(true);
 });
 
 describe('command shape', () => {
@@ -83,6 +87,32 @@ describe('/ticket set-channel', () => {
     );
     expect(ensureLobbyMessage).toHaveBeenCalled();
     expect(said(fake)).toContain('panel posted');
+  });
+
+  it('locks the lobby so the panel cannot be pushed out of view', async () => {
+    const fake = interaction({ subcommand: 'set-channel', options: { channel: { id: 'c1' } } });
+    await command.execute(fake);
+
+    expect(lockChannel).toHaveBeenCalledWith({ id: 'c1' }, expect.objectContaining({ botId: 'bot-1' }));
+    expect(said(fake)).toContain('read-only');
+  });
+
+  it('says so when the channel could not be locked, rather than implying it was', async () => {
+    lockChannel.mockResolvedValue({ ok: false, reason: 'missing permissions' });
+    const fake = interaction({ subcommand: 'set-channel', options: { channel: { id: 'c1' } } });
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('could **not** be locked');
+  });
+
+  it('names roles whose channel-specific posting rights were revoked', async () => {
+    lockChannel.mockResolvedValue({ ok: true, clearedRoles: ['r9'], warnings: [] });
+    const fake = interaction({ subcommand: 'set-channel', options: { channel: { id: 'c1' } } });
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('<@&r9>');
   });
 
   it('accepts an archive category at the same time', async () => {

@@ -216,6 +216,9 @@ function diffSnapshots(previous, current, { brackets = BRACKETS } = {}) {
     isFirstRun: !previous,
     maxLevel,
     totals: totals(current, maxLevel),
+    // The current roster, so the renderer can count who is reachable on
+    // Discord. Derived from the snapshot just taken, never persisted.
+    members: Object.values(current.members).map(summarize),
     // On a first run every member would read as a new recruit, which is
     // misleading, so membership changes are suppressed until there is a
     // baseline to compare against.

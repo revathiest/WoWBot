@@ -125,9 +125,15 @@ function charactersFor(userId) {
 /**
  * Links a character to a member.
  *
- * @returns {{linked: boolean, reason: string|null, characters: object[]}}
+ * `force` is what separates a member claiming their own character from an
+ * admin assigning one. A member is refused if somebody else already holds it —
+ * two people cannot both be Butud-Nightslayer, and silently stealing it would
+ * be worse. An admin is resolving exactly that kind of dispute, so their
+ * assignment moves the character and reports who lost it.
+ *
+ * @returns {{linked: boolean, reason: string|null, characters: object[], movedFrom?: string}}
  */
-function linkCharacter(userId, raw) {
+function linkCharacter(userId, raw, { force = false } = {}) {
   const id = String(userId ?? '').trim();
   const character = normalizeCharacter(raw);
 
@@ -139,14 +145,12 @@ function linkCharacter(userId, raw) {
   const existing = links[id] ?? [];
   const key = characterKey(character);
 
-  // Claiming a character somebody else already linked is a real mistake worth
-  // naming — two people cannot both be Butud-Nightslayer.
   const owner = Object.entries(links).find(
     ([ownerId, characters]) =>
       ownerId !== id && characters.some(entry => characterKey(entry) === key)
   );
 
-  if (owner) {
+  if (owner && !force) {
     return { linked: false, reason: 'claimed', claimedBy: owner[0], characters: existing };
   }
 
@@ -158,8 +162,22 @@ function linkCharacter(userId, raw) {
     return { linked: false, reason: 'full', characters: existing };
   }
 
-  const next = saveLinks({ ...links, [id]: [...existing, character] });
-  return { linked: true, reason: null, characters: next[id] };
+  const updated = { ...links, [id]: [...existing, character] };
+
+  // Taking it off the previous holder in the same write, so the character is
+  // never briefly linked to two people.
+  if (owner) {
+    updated[owner[0]] = owner[1].filter(entry => characterKey(entry) !== key);
+  }
+
+  const next = saveLinks(updated);
+
+  return {
+    linked: true,
+    reason: null,
+    characters: next[id],
+    ...(owner ? { movedFrom: owner[0] } : {})
+  };
 }
 
 /** Unlinks one character. Realm narrows the match when names collide. */

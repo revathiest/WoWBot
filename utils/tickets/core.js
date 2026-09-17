@@ -20,6 +20,8 @@
 
 const { ChannelType, MessageFlags, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 
+const { preflight } = require('../spam/enforcement');
+const { record } = require('../audit/log');
 const store = require('./store');
 const {
   CREATE_BUTTON_ID,
@@ -282,6 +284,14 @@ async function createTicket(interaction) {
     description
   });
 
+  record(interaction.client, {
+    kind: 'ticket',
+    action: `opened ticket #${ticketId}`,
+    actorId: interaction.user.id,
+    channelId: channel.id,
+    category: 'Admin'
+  });
+
   await interaction.editReply(`✅ Ticket created: ${channel.toString()}`);
   return ticket;
 }
@@ -331,6 +341,14 @@ async function handleClaim(interaction, ticketId) {
     claimedByLabel: interaction.member?.displayName || interaction.user.username
   });
 
+  record(interaction.client, {
+    kind: 'ticket',
+    action: `claimed ticket #${ticket.id}`,
+    actorId: interaction.user.id,
+    channelId: interaction.channel?.id,
+    category: 'Admin'
+  });
+
   await interaction.reply({ content: `🙋 Ticket claimed by <@${interaction.user.id}>.` });
 }
 
@@ -356,6 +374,15 @@ async function handleClose(interaction, ticketId) {
   const closed = store.closeTicket(ticket.channelId, { closedBy: interaction.user.id });
   const settings = store.getSettings(interaction.guildId);
   const channel = interaction.channel;
+
+  record(interaction.client, {
+    kind: 'ticket',
+    action: `closed ticket #${ticket.id}`,
+    actorId: interaction.user.id,
+    channelId: channel?.id,
+    detail: ticket.claimedBy ? `claimed by <@${ticket.claimedBy}>` : 'never claimed',
+    category: 'Admin'
+  });
 
   // Answer before rearranging the channel — editing permissions and moving it
   // between categories takes long enough to risk the interaction expiring.

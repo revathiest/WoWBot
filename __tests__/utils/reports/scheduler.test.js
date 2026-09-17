@@ -25,9 +25,14 @@ const {
 
 const APEX = { name: 'Apex', realm: 'Nightslayer', region: 'us', game: 'anniversary', channelId: null };
 
-/** A config with the fields the scheduler reads. */
+/** A config with the fields the scheduler reads. Daily, as shipped. */
 function config(overrides = {}) {
   return { ...DEFAULTS, channelId: 'channel-1', guilds: [APEX], ...overrides };
+}
+
+/** The same, on the weekly schedule. */
+function weekly(overrides = {}) {
+  return config({ frequency: 'weekly', ...overrides });
 }
 
 // 2026-09-14 is a Monday.
@@ -66,37 +71,66 @@ beforeEach(() => {
 
 afterEach(() => jest.restoreAllMocks());
 
-describe('lastSlotAt', () => {
+describe('lastSlotAt — daily', () => {
   it('returns today when the hour has already passed', () => {
     const now = Date.UTC(2026, 8, 14, 20, 0, 0); // Monday 20:00
-    expect(lastSlotAt(config({ dayOfWeek: 1, hour: 18 }), now)).toBe(MONDAY_18_UTC);
+    expect(lastSlotAt(config({ hour: 18 }), now)).toBe(MONDAY_18_UTC);
+  });
+
+  it('steps back to yesterday when the hour has not come round yet', () => {
+    const now = Date.UTC(2026, 8, 14, 9, 0, 0); // Monday 09:00
+    expect(lastSlotAt(config({ hour: 18 }), now)).toBe(MONDAY_18_UTC - DAY_MS);
+  });
+
+  it('ignores the weekday entirely', () => {
+    const thursday = Date.UTC(2026, 8, 17, 20, 0, 0);
+    expect(lastSlotAt(config({ hour: 18, dayOfWeek: 1 }), thursday)).toBe(
+      Date.UTC(2026, 8, 17, 18, 0, 0)
+    );
+  });
+
+  it('crosses a month boundary correctly', () => {
+    const now = Date.UTC(2026, 9, 1, 1, 0, 0); // 1 October, 01:00
+    expect(lastSlotAt(config({ hour: 18 }), now)).toBe(Date.UTC(2026, 8, 30, 18, 0, 0));
+  });
+});
+
+describe('lastSlotAt — weekly', () => {
+  it('returns today when the hour has already passed', () => {
+    const now = Date.UTC(2026, 8, 14, 20, 0, 0); // Monday 20:00
+    expect(lastSlotAt(weekly({ dayOfWeek: 1, hour: 18 }), now)).toBe(MONDAY_18_UTC);
   });
 
   it('steps back a full week when today is the day but the hour has not come', () => {
     const now = Date.UTC(2026, 8, 14, 9, 0, 0); // Monday 09:00
-    expect(lastSlotAt(config({ dayOfWeek: 1, hour: 18 }), now)).toBe(MONDAY_18_UTC - 7 * DAY_MS);
+    expect(lastSlotAt(weekly({ dayOfWeek: 1, hour: 18 }), now)).toBe(MONDAY_18_UTC - 7 * DAY_MS);
   });
 
   it('steps back to earlier in the week from a later day', () => {
     const now = Date.UTC(2026, 8, 17, 3, 0, 0); // Thursday
-    expect(lastSlotAt(config({ dayOfWeek: 1, hour: 18 }), now)).toBe(MONDAY_18_UTC);
+    expect(lastSlotAt(weekly({ dayOfWeek: 1, hour: 18 }), now)).toBe(MONDAY_18_UTC);
   });
 
   it('handles a Sunday schedule, where getUTCDay is zero', () => {
     const now = Date.UTC(2026, 8, 14, 12, 0, 0); // Monday
-    expect(lastSlotAt(config({ dayOfWeek: 0, hour: 12 }), now)).toBe(Date.UTC(2026, 8, 13, 12, 0, 0));
+    expect(lastSlotAt(weekly({ dayOfWeek: 0, hour: 12 }), now)).toBe(Date.UTC(2026, 8, 13, 12, 0, 0));
   });
 
   it('crosses a month boundary correctly', () => {
     const now = Date.UTC(2026, 9, 2, 1, 0, 0); // Friday 2 October
-    expect(lastSlotAt(config({ dayOfWeek: 1, hour: 18 }), now)).toBe(Date.UTC(2026, 8, 28, 18, 0, 0));
+    expect(lastSlotAt(weekly({ dayOfWeek: 1, hour: 18 }), now)).toBe(Date.UTC(2026, 8, 28, 18, 0, 0));
   });
 });
 
 describe('nextSlotAt', () => {
-  it('is exactly a week after the last slot', () => {
+  it('is exactly a day after the last slot when daily', () => {
     const now = Date.UTC(2026, 8, 14, 20, 0, 0);
-    expect(nextSlotAt(config(), now) - lastSlotAt(config(), now)).toBe(7 * DAY_MS);
+    expect(nextSlotAt(config(), now) - lastSlotAt(config(), now)).toBe(DAY_MS);
+  });
+
+  it('is exactly a week after the last slot when weekly', () => {
+    const now = Date.UTC(2026, 8, 14, 20, 0, 0);
+    expect(nextSlotAt(weekly(), now) - lastSlotAt(weekly(), now)).toBe(7 * DAY_MS);
   });
 });
 
@@ -294,11 +328,15 @@ describe('startReportScheduler', () => {
   });
 
   it('runs once the slot has passed', async () => {
-    loadConfig.mockReturnValue(config({ enabled: true, lastPostedAt: MONDAY_18_UTC - DAY_MS }));
+    loadConfig.mockReturnValue(
+      config({ enabled: true, lastPostedAt: MONDAY_18_UTC - 2 * DAY_MS })
+    );
     startReportScheduler(fakeClient(), { intervalMs: 1000, now: () => MONDAY_18_UTC + 60_000 });
 
     jest.advanceTimersByTime(1000);
-    await Promise.resolve();
+    // The tick resolves the server member list before it builds anything, so a
+    // single microtask flush is not enough to reach collectSnapshot.
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
 
     expect(collectSnapshot).toHaveBeenCalled();
   });

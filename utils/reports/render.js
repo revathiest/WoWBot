@@ -5,9 +5,10 @@
 // scheduler posting on its own, and `/report now` previewing on demand. Keeping
 // it here means the preview cannot drift from the real thing.
 
-const { EmbedBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 
 const { characterKey } = require('./links');
+const { countByDiscord, splitByDiscord } = require('./membership');
 const { discordTimestamp, factionColor, formatNumber } = require('../wow');
 
 // Discord's hard limits. Exceeding any of them rejects the whole message, so
@@ -118,6 +119,37 @@ function killLines(entries, realmSlug, owners) {
   );
 }
 
+const ROSTER_BUTTON_PREFIX = 'report:roster:';
+
+/**
+ * A button per guild, sending the full Discord breakdown by DM.
+ *
+ * One message can carry several guilds' reports, and components belong to a
+ * message rather than an embed, so each button names its guild. Discord allows
+ * five buttons per row and the tracked-guild ceiling is ten, hence the split.
+ */
+function buildRosterComponents(guilds) {
+  const rows = [];
+
+  for (let index = 0; index < guilds.length; index += 5) {
+    const row = new ActionRowBuilder().addComponents(
+      guilds.slice(index, index + 5).map(guild =>
+        new ButtonBuilder()
+          .setCustomId(`${ROSTER_BUTTON_PREFIX}${guild.key}`)
+          .setLabel(
+            guilds.length === 1 ? 'Who is on Discord?' : `${guild.name}: who is on Discord?`.slice(0, 80)
+          )
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('🔗')
+      )
+    );
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
 /** The period the report covers, or an explanation of why there is no period. */
 function describePeriod(diff) {
   if (diff.isFirstRun) {
@@ -138,7 +170,7 @@ function describePeriod(diff) {
  * @param {Map}    owners   Character key -> Discord user id, from buildOwnerIndex.
  * @param {string[]} warnings  Anything the collector could not fetch.
  */
-function buildReportEmbed({ diff, owners = new Map(), warnings = [] }) {
+function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUserIds = null }) {
   const realmSlug = diff.guild?.realmSlug ?? diff.guild?.realm;
 
   const embed = new EmbedBuilder()
@@ -155,6 +187,20 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [] }) {
     },
     { name: 'Arena Ranked', value: formatNumber(diff.totals.ranked), inline: true }
   );
+
+  // Headline numbers only. Who they actually are is a button press away, so the
+  // report does not turn into a wall of names every week.
+  const counts = countByDiscord(
+    splitByDiscord(diff.members ?? [], realmSlug, owners, presentUserIds)
+  );
+
+  if (counts.total > 0) {
+    embed.addFields(
+      { name: '🟢 On Discord', value: formatNumber(counts.onDiscord), inline: true },
+      { name: '⚪ Not on Discord', value: formatNumber(counts.notOnDiscord), inline: true },
+      { name: '​', value: '​', inline: true }
+    );
+  }
 
   addList(embed, `📥 Joined (${diff.joined.length})`, membershipLines(diff.joined, realmSlug, owners));
   addList(embed, `📤 Left (${diff.left.length})`, membershipLines(diff.left, realmSlug, owners));
@@ -210,10 +256,12 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [] }) {
 }
 
 module.exports = {
+  ROSTER_BUTTON_PREFIX,
   MAX_FIELD_LENGTH,
   MAX_LADDER_LISTED,
   MAX_LISTED,
   buildReportEmbed,
+  buildRosterComponents,
   describePeriod,
   formatChange,
   guildLabel,

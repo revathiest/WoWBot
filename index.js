@@ -15,6 +15,8 @@ const { loadConfig: loadOnboardingConfig } = require('./utils/onboarding/config'
 const { startOnboardingSweeper } = require('./utils/onboarding/sweep');
 const ticketStore = require('./utils/tickets/store');
 const { ensureLobbyMessage } = require('./utils/tickets/core');
+const { refreshAll: refreshHelpPosts } = require('./utils/help/post');
+const { loadConfig: loadAuditConfig } = require('./utils/audit/config');
 const { describeGuilds, guildScopeWarnings, isGuildInScope } = require('./utils/guildScope');
 
 const config = readConfig();
@@ -116,6 +118,27 @@ client.once(Events.ClientReady, async readyClient => {
   }
 
   await registerCommands(readyClient, { config });
+
+  // The help post is generated from the commands that just loaded, so it is
+  // rebuilt AFTER registration — that is what keeps it from ever describing a
+  // command the bot no longer has, or missing one it just gained.
+  const helpPosts = await refreshHelpPosts(readyClient, readyClient.commands, {
+    inScope: guildId => isGuildInScope(guildId, config.discord.guildId)
+  });
+
+  const published = helpPosts.filter(result => result.ok);
+  console.log(
+    published.length > 0
+      ? `   Help post: 📖 up to date in ${published.length} guild(s)`
+      : '   Help post: ⚪ not set up — /help setup channel:#help'
+  );
+
+  const audit = loadAuditConfig();
+  console.log(
+    audit.enabled && audit.channelId
+      ? `   Audit log: 📝 on (${audit.verbosity})`
+      : '   Audit log: ⚪ off — /auditlog channel, then /auditlog enabled value:true'
+  );
 });
 
 client.on(Events.Error, err => console.error('Discord client error:', err));

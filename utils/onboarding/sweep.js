@@ -18,6 +18,7 @@ const { recordSweep, wasWarned } = require('./state');
 const { buildSweepEmbed, kickMessage, sendAlert, warningMessage } = require('./alert');
 const { preflight } = require('../spam/enforcement');
 const { isGuildInScope } = require('../guildScope');
+const { record } = require('../audit/log');
 const { readConfig } = require('../../config');
 
 // Ten minutes. The deadline is measured in days, so this only decides how
@@ -204,6 +205,16 @@ async function runSweep(client, { now = Date.now(), config = loadConfig(), dryRu
         client,
         channelId: config.alertChannelId,
         embed: buildSweepEmbed({ ...result, config, dryRun })
+      });
+
+      record(client, {
+        kind: 'kick',
+        action: dryRun ? 'dry-ran the onboarding sweep' : 'ran the onboarding sweep',
+        detail:
+          `${result.kicked.length} removed, ${result.warned.length} reminded` +
+          (result.blocked.length > 0 ? `, ${result.blocked.length} blocked` : ''),
+        automatic: true,
+        ok: result.blocked.length === 0
       });
     }
   }

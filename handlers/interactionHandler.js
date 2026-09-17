@@ -4,7 +4,8 @@
 const { MessageFlags } = require('discord.js');
 const { BlizzardApiError } = require('../utils/blizzard/client');
 const { isGuildInScope } = require('../utils/guildScope');
-const { handleComponent: handleTicketComponent } = require('../utils/tickets/core');
+const { routeComponent } = require('../utils/components');
+const { describeCommand, record } = require('../utils/audit/log');
 const { readConfig } = require('../config');
 
 /**
@@ -134,17 +135,24 @@ function resetIgnoredGuilds() {
 }
 
 /**
- * Buttons and modals, which the ticket system uses for its whole member-facing
- * flow. Routed here rather than through `client.commands` because a component
- * belongs to whatever posted it, not to a slash command — the custom id is the
- * routing key.
+ * Buttons and modals. Routed through utils/components.js rather than
+ * `client.commands`, because a component belongs to whatever posted it, not to
+ * a slash command — the custom id prefix is the routing key.
  *
  * Errors get the same treatment as a command's, so a failed button says
  * something useful instead of spinning forever.
  */
 async function handleComponentInteraction(interaction) {
   try {
-    await handleTicketComponent(interaction);
+    await routeComponent(interaction);
+
+    record(interaction.client, {
+      kind: 'button',
+      action: `used \`${interaction.customId}\``,
+      actorId: interaction.user?.id,
+      channelId: interaction.channelId,
+      category: 'Admin'
+    });
   } catch (err) {
     if (isDeadInteraction(err)) {
       console.warn(
@@ -154,6 +162,17 @@ async function handleComponentInteraction(interaction) {
     }
 
     console.error(`❌ Error handling component ${interaction.customId}:`, err);
+
+    record(interaction.client, {
+      kind: 'button',
+      action: `used \`${interaction.customId}\``,
+      actorId: interaction.user?.id,
+      channelId: interaction.channelId,
+      detail: err.message,
+      category: 'Admin',
+      ok: false
+    });
+
     await respondWithError(interaction, describeError(err));
   }
 }
@@ -197,6 +216,14 @@ async function handleInteraction(interaction) {
 
   try {
     await command.execute(interaction);
+
+    record(interaction.client, {
+      kind: command.category === 'Admin' ? 'config' : 'command',
+      action: `ran \`${describeCommand(interaction)}\``,
+      actorId: interaction.user?.id,
+      channelId: interaction.channelId,
+      category: command.category
+    });
   } catch (err) {
     // A dead interaction is not a command failure -- there is nothing to report
     // to and nothing to fix in the command, so log one line, not a stack trace.
@@ -208,6 +235,17 @@ async function handleInteraction(interaction) {
     }
 
     console.error(`❌ Error running /${interaction.commandName}:`, err);
+
+    record(interaction.client, {
+      kind: 'error',
+      action: `ran \`${describeCommand(interaction)}\``,
+      actorId: interaction.user?.id,
+      channelId: interaction.channelId,
+      detail: err.message,
+      category: command.category,
+      ok: false
+    });
+
     await respondWithError(interaction, describeError(err));
   }
 }

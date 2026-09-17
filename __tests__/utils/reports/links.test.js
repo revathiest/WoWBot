@@ -138,6 +138,35 @@ describe('linkCharacter', () => {
     expect(linkCharacter('user-1', BUTUD)).toMatchObject({ linked: false, reason: 'full' });
   });
 
+  it('moves a claimed character when an admin forces it', () => {
+    // An admin assigning a character is usually settling exactly the dispute
+    // that a member's own claim would be refused for.
+    fileContains({ 'user-2': [BUTUD] });
+
+    const result = linkCharacter('user-1', BUTUD, { force: true });
+
+    expect(result).toMatchObject({ linked: true, movedFrom: 'user-2' });
+  });
+
+  it('takes it off the previous holder in the same write', () => {
+    fileContains({ 'user-2': [BUTUD, { ...BUTUD, name: 'Other' }] });
+
+    linkCharacter('user-1', BUTUD, { force: true });
+
+    expect(written()['user-2']).toEqual([expect.objectContaining({ name: 'Other' })]);
+    expect(written()['user-1']).toEqual([expect.objectContaining({ name: 'Butud' })]);
+  });
+
+  it('still refuses a duplicate even when forced', () => {
+    fileContains({ 'user-1': [BUTUD] });
+    expect(linkCharacter('user-1', BUTUD, { force: true })).toMatchObject({ reason: 'duplicate' });
+  });
+
+  it('reports no move when nobody held it', () => {
+    fileMissing();
+    expect(linkCharacter('user-1', BUTUD, { force: true }).movedFrom).toBeUndefined();
+  });
+
   it('refuses an unusable character', () => {
     fileMissing();
     expect(linkCharacter('user-1', { realm: 'Nightslayer' })).toMatchObject({

@@ -94,8 +94,19 @@ describe('permissions', () => {
 });
 
 describe('/report status', () => {
-  it('shows the schedule when enabled', async () => {
-    loadConfig.mockReturnValue(config({ enabled: true, dayOfWeek: 1, hour: 18 }));
+  it('shows a daily schedule when enabled', async () => {
+    loadConfig.mockReturnValue(config({ enabled: true, frequency: 'daily', hour: 18 }));
+    const fake = interaction({ subcommand: 'status' });
+
+    await command.execute(fake);
+
+    expect(payloadOf(fake).embeds[0].toJSON().description).toContain('Daily');
+  });
+
+  it('names the weekday only on a weekly schedule', async () => {
+    loadConfig.mockReturnValue(
+      config({ enabled: true, frequency: 'weekly', dayOfWeek: 1, hour: 18 })
+    );
     const fake = interaction({ subcommand: 'status' });
 
     await command.execute(fake);

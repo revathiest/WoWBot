@@ -47,9 +47,11 @@ describe('loadCommandsRecursively', () => {
     expect([...commands.keys()].sort()).toEqual([
       'arena',
       'audit',
+      'auditlog',
       'autokick',
       'character',
       'guild',
+      'help',
       'iam',
       'item',
       'mythicplus',

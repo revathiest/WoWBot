@@ -21,7 +21,8 @@ function createInteraction({
     guildId: 'test-guild',
     guild,
     user,
-    client: { commands, ...client },
+    // Anything that edits channel permissions needs the bot's own id.
+    client: { commands, user: { id: 'bot-1' }, ...client },
     memberPermissions: { has: () => permissions },
     options: {
       getString: read,

@@ -44,6 +44,45 @@ function buildNamespace(namespace, game, region) {
   return infix ? `${namespace}-${infix}-${region}` : `${namespace}-${region}`;
 }
 
+/**
+ * Commands that were open to everyone before the server was locked down.
+ *
+ * This list is the UNDO. While `adminOnly` is on, every command requires Manage
+ * Server regardless of what it declares for itself; turning it off restores
+ * each command's own permissions, and these are the ones that go back to being
+ * public. Recorded here so that restoring is reading a list rather than
+ * reconstructing one from memory.
+ *
+ * Two of them are public commands with admin-only SUBCOMMANDS, which keep their
+ * own gating either way: /help (setup, unlock) and /iam (manage).
+ */
+const PUBLIC_COMMANDS = [
+  'arena',
+  'audit',
+  'character',
+  'guild',
+  'help',
+  'iam',
+  'item',
+  'mythicplus',
+  'realm',
+  'realms',
+  'token'
+];
+
+/**
+ * Locks every command to Manage Server.
+ *
+ * On by default while the bot is being rolled out. Set `ADMIN_ONLY=false` in
+ * the environment to hand the commands in PUBLIC_COMMANDS back to everybody —
+ * that is the whole revert.
+ */
+function readAdminOnly(env = process.env) {
+  const value = String(env.ADMIN_ONLY ?? '').trim().toLowerCase();
+  if (value === 'false' || value === '0' || value === 'no') return false;
+  return true;
+}
+
 function normalizeRegion(value) {
   const region = String(value ?? '').trim().toLowerCase();
   return REGIONS.includes(region) ? region : null;
@@ -52,6 +91,8 @@ function normalizeRegion(value) {
 function readConfig(env = process.env) {
   return {
     discord: {
+      // While true, every command requires Manage Server. See PUBLIC_COMMANDS.
+      adminOnly: readAdminOnly(env),
       token: env.DISCORD_TOKEN ?? '',
       applicationId: env.APPLICATION_ID ?? '',
       // Optional: when present, commands register to this guild only (instant updates).
@@ -82,6 +123,7 @@ function validateConfig(config = readConfig()) {
 }
 
 module.exports = {
+  PUBLIC_COMMANDS,
   REGIONS,
   GAMES,
   DEFAULT_REGION,
@@ -90,6 +132,7 @@ module.exports = {
   buildNamespace,
   normalizeGame,
   normalizeRegion,
+  readAdminOnly,
   readConfig,
   validateConfig
 };

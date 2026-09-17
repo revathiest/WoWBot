@@ -45,7 +45,9 @@ describe('readConfig', () => {
     expect(config.discord).toEqual({
       token: 'discord-token',
       applicationId: '123',
-      guildId: '456'
+      guildId: '456',
+      // Locked by default; see PUBLIC_COMMANDS for the revert.
+      adminOnly: true
     });
     expect(config.blizzard).toEqual({
       clientId: 'client-id',
@@ -135,5 +137,41 @@ describe('validateConfig', () => {
     expect(problems.join(' ')).toContain('APPLICATION_ID');
     expect(problems.join(' ')).toContain('BLIZZARD_CLIENT_ID');
     expect(problems.join(' ')).toContain('BLIZZARD_CLIENT_SECRET');
+  });
+});
+
+describe('admin-only lockdown', () => {
+  const { PUBLIC_COMMANDS, readAdminOnly, readConfig } = require('../config');
+
+  it('is on by default, so a fresh deploy is locked', () => {
+    expect(readAdminOnly({})).toBe(true);
+    expect(readConfig({}).discord.adminOnly).toBe(true);
+  });
+
+  it.each(['false', 'FALSE', '0', 'no'])('is lifted by ADMIN_ONLY=%s', value => {
+    expect(readAdminOnly({ ADMIN_ONLY: value })).toBe(false);
+  });
+
+  it('stays on for anything else, rather than unlocking by accident', () => {
+    expect(readAdminOnly({ ADMIN_ONLY: 'yes' })).toBe(true);
+    expect(readAdminOnly({ ADMIN_ONLY: 'nonsense' })).toBe(true);
+  });
+
+  it('records the commands that were public, as the undo list', () => {
+    // This list is how the lock gets reverted; losing it means reconstructing
+    // it from memory.
+    expect(PUBLIC_COMMANDS).toEqual([
+      'arena',
+      'audit',
+      'character',
+      'guild',
+      'help',
+      'iam',
+      'item',
+      'mythicplus',
+      'realm',
+      'realms',
+      'token'
+    ]);
   });
 });

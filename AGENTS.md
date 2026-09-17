@@ -162,6 +162,20 @@ Three channels are owned outright by the bot — the help post, the ticket lobby
 - **`verbosity: 'admin'` still records everything automatic.** An unprompted kick or a scheduled report is the whole point of having a log, so the filter only ever drops ordinary lookups.
 - This is separate from the spam and onboarding alert channels on purpose: those carry the full reasoning behind one decision, this is the flat chronological feed.
 
+## Admin-only lockdown
+
+- **`config.discord.adminOnly` is ON by default.** Every command requires Manage Server while it is, whatever the command declares for itself. `ADMIN_ONLY=false` lifts it.
+- **`PUBLIC_COMMANDS` in `config/index.js` is the undo.** It records which commands were open to everyone before the lock, so restoring is reading a list rather than reconstructing one. Keep it accurate if a public command is added.
+- **The lock is applied twice, deliberately.** `buildDefinitions` stamps Manage Server onto every registration so members do not see the commands; `handleInteraction` re-checks, because a guild can override the permission Discord displays. Removing either one leaves a lock that does not hold.
+
+## Mains and nicknames
+
+- **Exactly one main, enforced in `normalizeCharacters`, not trusted from the file.** Two mains give an unstable nickname; none silently stops somebody being counted as a person. The first flagged character wins, and the first character becomes the main when none is flagged.
+- **Unlinking a main promotes a replacement**, which falls out of the normalizer rather than being special-cased.
+- **The bot cannot rename the server owner — ever — and cannot rename anyone ranked at or above itself.** That covers most officers, so every path reports refusals with their reason instead of failing quietly. This is the single most likely thing to be mistaken for a broken feature.
+- **Nicknames are re-applied on `GuildMemberAdd`**, because Discord discards them when somebody leaves.
+- **Headcounts are people, unclaimed characters are characters** (`countPeople` in membership.js). Never fold the two together: alts collapse only when somebody has claimed them, and pretending otherwise turns a guess into a stated fact.
+
 ## Testing
 
 - `npm test` runs Jest with coverage and an 80% global threshold. Keep it passing.

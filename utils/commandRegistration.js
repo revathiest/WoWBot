@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { REST, Routes } = require('discord.js');
+const { PermissionFlagsBits, REST, Routes } = require('discord.js');
 const { readConfig } = require('../config');
 
 const COMMANDS_DIR = path.join(__dirname, '..', 'commands');
@@ -74,9 +74,25 @@ async function putGuildCommands({ rest, applicationId, guildId, definitions, lab
   }
 }
 
-/** The command definitions, built once and reused across guilds. */
-function buildDefinitions(commandMap) {
-  return [...commandMap.values()].map(command => command.data.toJSON());
+/**
+ * The command definitions, built once and reused across guilds.
+ *
+ * When `adminOnly` is on, every definition is stamped with Manage Server
+ * regardless of what the command declares for itself. That hides them from
+ * ordinary members in the UI; the real check is in handlers/interactionHandler,
+ * since a guild can override the permission Discord shows.
+ */
+function buildDefinitions(commandMap, { adminOnly = readConfig().discord.adminOnly } = {}) {
+  return [...commandMap.values()].map(command => {
+    const definition = command.data.toJSON();
+
+    if (!adminOnly) return definition;
+
+    return {
+      ...definition,
+      default_member_permissions: String(PermissionFlagsBits.ManageGuild)
+    };
+  });
 }
 
 /**

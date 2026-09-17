@@ -10,7 +10,7 @@ const { EmbedBuilder, MessageFlags } = require('discord.js');
 
 const { loadSnapshot } = require('./history');
 const { buildOwnerIndex } = require('./links');
-const { countByDiscord, fetchPresentUserIds, splitByDiscord } = require('./membership');
+const { countPeople, discordOnly, rosterUserIds, splitByDiscord } = require('./membership');
 const { ROSTER_BUTTON_PREFIX } = require('./render');
 const { FALLBACK_COLOR } = require('../wow');
 
@@ -57,32 +57,53 @@ function nameFields(label, members, { emoji = '' } = {}) {
   }));
 }
 
-/** The DM: who is reachable on Discord, who has left, and who was never linked. */
-function buildBreakdownEmbed({ guild, split }) {
-  const counts = countByDiscord(split);
+/** "1 person" / "3 people" */
+function countOf(value, singular, plural) {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+/**
+ * The DM: who is on Discord, who has left, whose characters nobody claims,
+ * and who is in the server without a character on this roster.
+ *
+ * Headline numbers are PEOPLE — alts collapse — while the unclaimed list is
+ * characters, because nobody knows how many people they represent.
+ */
+function buildBreakdownEmbed({ guild, split, outsiders = [] }) {
+  const people = countPeople(split);
 
   const embed = new EmbedBuilder()
     .setColor(FALLBACK_COLOR)
     .setTitle(`${guild?.name ?? 'Guild'} — Discord breakdown`)
     .setDescription(
-      `**${counts.onDiscord}** of ${counts.total} roster members are on Discord; ` +
-        `**${counts.notOnDiscord}** are not.`
+      `**${countOf(people.onDiscord, 'person is', 'people are')}** on Discord, from ` +
+        `${countOf(split.onDiscord.length, 'character', 'characters')}. ` +
+        `${countOf(people.unidentified, 'character', 'characters')} on the roster ` +
+        `${people.unidentified === 1 ? 'is' : 'are'} claimed by nobody.`
     );
 
   embed.addFields(
     ...nameFields('On Discord', split.onDiscord, { emoji: '🟢' }),
     ...nameFields('Linked, but left the server', split.left, { emoji: '🚪' }),
-    ...nameFields('Not linked to anyone', split.unlinked, { emoji: '⚪' })
+    ...nameFields('Not linked to anyone — chase these', split.unlinked, { emoji: '⚪' })
   );
 
+  if (outsiders.length > 0) {
+    // The other direction: in the server, but not on this roster.
+    embed.addFields(
+      ...nameFields('In Discord, not in the guild', outsiders, { emoji: '👋' })
+    );
+  }
+
   if (split.unlinked.length > 0) {
-    // The honest caveat: an unlinked character is not proof of absence.
+    // The honest caveat: an unclaimed character is not proof of absence.
     embed.addFields({
       name: 'About "not linked"',
       value:
         'The bot can only connect a character to a Discord account when somebody claims it with ' +
         '`/iam add`, or an admin assigns it with `/iam manage assign`. Anyone in this list may ' +
-        'well be in the server without having done that.'
+        'well be in the server without having done that — assigning their character is what ' +
+        'turns them from a guess into a name.'
     });
   }
 
@@ -120,9 +141,23 @@ async function handleComponent(interaction) {
     className: member.className
   }));
 
-  const presentUserIds = interaction.guild ? await fetchPresentUserIds(interaction.guild) : null;
+  // The full member list is needed twice: to tell a departed account from a
+  // present one, and to find people in the server with no roster character.
+  let serverMembers = null;
+  try {
+    serverMembers = interaction.guild ? await interaction.guild.members.fetch() : null;
+  } catch (err) {
+    console.warn(`⚠️  reports: could not read the member list — ${err.message}`);
+  }
+
+  const presentUserIds = serverMembers ? new Set([...serverMembers.keys()]) : null;
   const split = splitByDiscord(members, realmSlug, buildOwnerIndex(), presentUserIds);
-  const embed = buildBreakdownEmbed({ guild: snapshot.guild, split });
+
+  const outsiders = serverMembers
+    ? discordOnly(serverMembers.values(), rosterUserIds(split))
+    : [];
+
+  const embed = buildBreakdownEmbed({ guild: snapshot.guild, split, outsiders });
 
   try {
     await interaction.user.send({ embeds: [embed] });
@@ -138,4 +173,10 @@ async function handleComponent(interaction) {
   return true;
 }
 
-module.exports = { MAX_FIELDS_PER_GROUP, buildBreakdownEmbed, handleComponent, nameFields };
+module.exports = {
+  MAX_FIELDS_PER_GROUP,
+  buildBreakdownEmbed,
+  countOf,
+  handleComponent,
+  nameFields
+};

@@ -8,6 +8,7 @@ const { readConfig, validateConfig } = require('./config');
 const { registerCommands, registerGuildJoinHandler } = require('./utils/commandRegistration');
 const { registerInteractionHandler } = require('./handlers/interactionHandler');
 const { registerMessageHandler } = require('./handlers/messageHandler');
+const { registerMemberHandler } = require('./handlers/memberHandler');
 const { loadConfig: loadSpamConfig } = require('./utils/spam/config');
 const { loadConfig: loadReportConfig, DAYS } = require('./utils/reports/config');
 const { startReportScheduler, nextSlotAt } = require('./utils/reports/scheduler');
@@ -51,6 +52,8 @@ const client = new Client({
 
 registerInteractionHandler(client, Events);
 registerMessageHandler(client, Events);
+// Restores a rejoining member's nickname; Discord drops it when they leave.
+registerMemberHandler(client, Events);
 // A guild that invites the bot gets its commands immediately, rather than at the
 // next restart.
 registerGuildJoinHandler(client, Events);
@@ -131,6 +134,13 @@ client.once(Events.ClientReady, async readyClient => {
     published.length > 0
       ? `   Help post: 📖 up to date in ${published.length} guild(s)`
       : '   Help post: ⚪ not set up — /help setup channel:#help'
+  );
+
+  const nicknames = require('./utils/nicknames/config').loadConfig();
+  console.log(
+    nicknames.enabled
+      ? '   Nicknames: 🏷️  synced to main characters'
+      : '   Nicknames: ⚪ not synced — /iam manage nicknames value:true'
   );
 
   const audit = loadAuditConfig();

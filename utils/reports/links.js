@@ -47,10 +47,22 @@ function normalizeCharacter(raw, config = readConfig()) {
     name,
     realm,
     region: normalizeRegion(source.region) ?? config.blizzard.region,
-    game: normalizeGame(source.game) ?? config.blizzard.game
+    game: normalizeGame(source.game) ?? config.blizzard.game,
+    // The character this person is known by: it sets their nickname, and it
+    // is what makes them count as ONE person rather than one per alt.
+    main: Boolean(source.main)
   };
 }
 
+/**
+ * Normalises one person's characters, and guarantees EXACTLY ONE main.
+ *
+ * Enforced here rather than trusted from the file, because everything
+ * downstream assumes it: a person with two mains would get an unstable
+ * nickname, and one with none would silently stop being counted as a person.
+ * The first flagged character wins; if none is flagged, the first character
+ * becomes the main.
+ */
 function normalizeCharacters(value, config = readConfig()) {
   if (!Array.isArray(value)) return [];
 
@@ -70,7 +82,12 @@ function normalizeCharacters(value, config = readConfig()) {
     if (characters.length >= MAX_CHARACTERS_PER_USER) break;
   }
 
-  return characters;
+  if (characters.length === 0) return characters;
+
+  const first = characters.findIndex(character => character.main);
+  const mainIndex = first === -1 ? 0 : first;
+
+  return characters.map((character, index) => ({ ...character, main: index === mainIndex }));
 }
 
 /** Applies defaults and drops anything unusable, as the spam config does. */
@@ -199,8 +216,43 @@ function unlinkCharacter(userId, { name, realm = null }) {
     return { removed: false, characters: existing };
   }
 
+  // normalizeCharacters promotes a new main when the old one is removed, so
+  // unlinking somebody's main never leaves them without one.
   const next = saveLinks({ ...links, [id]: remaining });
   return { removed: true, characters: next[id] ?? [] };
+}
+
+/** The character a person is known by, or null if they have linked none. */
+function mainFor(userId) {
+  return charactersFor(userId).find(character => character.main) ?? null;
+}
+
+/**
+ * Moves the main flag to another of a person's characters.
+ *
+ * @returns {{changed: boolean, reason: string|null, main: object|null}}
+ */
+function setMain(userId, { name, realm = null }) {
+  const id = String(userId ?? '').trim();
+  const links = loadLinks();
+  const existing = links[id] ?? [];
+
+  const nameKey = String(name ?? '').trim().toLowerCase();
+  const realmKey = realm ? realmMatchKey(realm) : null;
+
+  const matches = character =>
+    character.name.toLowerCase() === nameKey &&
+    (realmKey === null || realmMatchKey(character.realm) === realmKey);
+
+  const target = existing.find(matches);
+
+  if (!target) return { changed: false, reason: 'not-linked', main: mainFor(id) };
+  if (target.main) return { changed: false, reason: 'already-main', main: target };
+
+  const updated = existing.map(character => ({ ...character, main: matches(character) }));
+  const next = saveLinks({ ...links, [id]: updated });
+
+  return { changed: true, reason: null, main: next[id].find(character => character.main) };
 }
 
 /** Deletes everything stored for a member. */
@@ -249,7 +301,9 @@ module.exports = {
   forget,
   linkCharacter,
   loadLinks,
+  mainFor,
   normalizeLinks,
   saveLinks,
+  setMain,
   unlinkCharacter
 };

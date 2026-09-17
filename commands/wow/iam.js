@@ -20,8 +20,12 @@ const {
   charactersFor,
   forget,
   linkCharacter,
+  mainFor,
+  setMain,
   unlinkCharacter
 } = require('../../utils/reports/links');
+const { loadConfig: loadNicknameConfig, saveConfig: saveNicknameConfig } = require('../../utils/nicknames/config');
+const { planGuild, syncGuild, syncMember } = require('../../utils/nicknames/sync');
 const { getCharacterProfile } = require('../../utils/blizzard/profile');
 const { resolveRealm } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
@@ -71,6 +75,17 @@ const data = new SlashCommandBuilder()
       )
   )
   .addSubcommand(sub =>
+    sub
+      .setName('main')
+      .setDescription('Choose which of your characters you are known by.')
+      .addStringOption(option =>
+        option.setName('character').setDescription('Character name.').setRequired(true)
+      )
+      .addStringOption(option =>
+        option.setName('realm').setDescription('Realm, if you have claimed the name twice.')
+      )
+  )
+  .addSubcommand(sub =>
     sub.setName('forget').setDescription('Delete everything the bot stores about you.')
   )
   .addSubcommandGroup(group => {
@@ -104,6 +119,38 @@ const data = new SlashCommandBuilder()
           )
           .addStringOption(option =>
             option.setName('realm').setDescription('Realm, if the name is linked twice.')
+          )
+      )
+      .addSubcommand(sub =>
+        sub
+          .setName('main')
+          .setDescription('Set which character a member is known by.')
+          .addUserOption(option =>
+            option.setName('user').setDescription('Whose main to set.').setRequired(true)
+          )
+          .addStringOption(option =>
+            option.setName('character').setDescription('Character name.').setRequired(true)
+          )
+          .addStringOption(option =>
+            option.setName('realm').setDescription('Realm, if the name is linked twice.')
+          )
+      )
+      .addSubcommand(sub =>
+        sub
+          .setName('nicknames')
+          .setDescription('Whether nicknames are kept in step with main characters.')
+          .addBooleanOption(option =>
+            option.setName('value').setDescription('On or off.').setRequired(true)
+          )
+      )
+      .addSubcommand(sub =>
+        sub
+          .setName('sync')
+          .setDescription('Rename everyone to their main character.')
+          .addBooleanOption(option =>
+            option
+              .setName('apply')
+              .setDescription('Leave this off to preview who would be renamed.')
           )
       );
 
@@ -198,6 +245,11 @@ async function add(interaction, { targetId = interaction.user.id, force = false 
         : 'Weekly reports will mention them when this character does something worth reporting.'
     );
 
+    // A first character becomes the main automatically, so this is usually
+    // where somebody's nickname gets set.
+    const note = describeNickname(await applyNickname(interaction, targetId));
+    if (note) lines.push(note);
+
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
@@ -258,9 +310,120 @@ function remove(interaction, { targetId = interaction.user.id } = {}) {
       '`/iam list user:@them` shows what is.';
 }
 
+/**
+ * Renames a member to their main, if nickname syncing is on.
+ *
+ * Best effort by design: a refusal is reported to whoever ran the command,
+ * never raised as an error. Failing to rename somebody must not undo the
+ * assignment that prompted it.
+ */
+async function applyNickname(interaction, userId) {
+  if (!loadNicknameConfig().enabled) return null;
+
+  try {
+    const member = await interaction.guild?.members?.fetch(userId);
+    return member ? await syncMember(interaction.guild, member) : null;
+  } catch {
+    // Not in the server, or not fetchable. Nothing to rename.
+    return null;
+  }
+}
+
+/** A one-line note about what happened to somebody's nickname. */
+function describeNickname(plan) {
+  if (!plan) return null;
+  if (plan.action === 'rename') return `Nickname set to **${plan.to}**.`;
+  if (plan.reason === 'already correct') return null;
+
+  return `⚠️ Nickname not changed — ${plan.reason}.`;
+}
+
+/** Moves somebody's main, and renames them to match. */
+async function changeMain(interaction, { targetId }) {
+  const characterName = interaction.options.getString('character');
+  const realm = interaction.options.getString('realm');
+  const self = targetId === interaction.user.id;
+  const who = self ? 'your' : `<@${targetId}>'s`;
+
+  const { changed, reason, main } = setMain(targetId, { name: characterName, realm });
+
+  if (!changed && reason === 'not-linked') {
+    return `⚠️ **${characterName}** is not linked to ${self ? 'you' : `<@${targetId}>`}.`;
+  }
+
+  if (!changed && reason === 'already-main') {
+    return `⚠️ **${main.name}** is already ${who} main.`;
+  }
+
+  const note = describeNickname(await applyNickname(interaction, targetId));
+
+  return [`✅ **${main.name}** is now ${who} main.`, note].filter(Boolean).join(' ');
+}
+
 /** Assigning on somebody's behalf is a moderator action, not a self-service one. */
 function isAdmin(interaction) {
   return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
+}
+
+/**
+ * Renames everybody who has a main, or shows who would be renamed.
+ *
+ * Preview is the default and `apply:true` is the opt-in, because this changes
+ * how every linked member appears to the whole server at once.
+ */
+async function syncEveryone(interaction) {
+  let members;
+  try {
+    members = [...(await interaction.guild.members.fetch()).values()];
+  } catch (err) {
+    await interaction.editReply(`❌ Could not read the member list — ${err.message}`);
+    return;
+  }
+
+  const apply = interaction.options.getBoolean('apply') ?? false;
+  const plans = planGuild(interaction.guild, members);
+  const due = plans.filter(plan => plan.action === 'rename');
+
+  // 'already correct' is not worth reporting; a refusal is.
+  const blocked = plans.filter(
+    plan => plan.action === 'skip' && plan.reason !== 'already correct'
+  );
+
+  const lines = [];
+
+  if (!apply) {
+    lines.push(
+      `👀 Preview — **${due.length}** member(s) would be renamed. Nothing has changed.`,
+      'Re-run with `apply:true` to do it.'
+    );
+  } else {
+    const { renamed } = await syncGuild(interaction.guild, members);
+    lines.push(`✅ Renamed **${renamed.length}** member(s).`);
+  }
+
+  if (due.length > 0) {
+    lines.push(
+      '',
+      due
+        .slice(0, 15)
+        .map(plan => `• ${plan.from ?? '_no nickname_'} → **${plan.to}**`)
+        .join('\n') + (due.length > 15 ? `\n_…and ${due.length - 15} more_` : '')
+    );
+  }
+
+  if (blocked.length > 0) {
+    // The expected case, not an error: officers usually outrank the bot.
+    lines.push(
+      '',
+      `⚠️ **${blocked.length}** could not be renamed:`,
+      blocked
+        .slice(0, 10)
+        .map(plan => `• ${plan.member.displayName} — ${plan.reason}`)
+        .join('\n') + (blocked.length > 10 ? `\n_…and ${blocked.length - 10} more_` : '')
+    );
+  }
+
+  await interaction.editReply(lines.join('\n').slice(0, 2000));
 }
 
 async function execute(interaction) {
@@ -278,6 +441,28 @@ async function execute(interaction) {
       return;
     }
 
+    if (subcommand === 'nicknames') {
+      const value = interaction.options.getBoolean('value');
+      saveNicknameConfig({ enabled: value });
+
+      await interaction.reply({
+        content: value
+          ? '✅ Nicknames will follow main characters from now on. Run `/iam manage sync` to ' +
+            'apply it to everyone already linked.\n' +
+            '_The bot cannot rename the server owner, or anyone whose highest role sits at or ' +
+            'above its own — `sync` lists who it had to skip._'
+          : '✅ Nicknames will be left alone. Existing ones are not reverted.',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    if (subcommand === 'sync') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await syncEveryone(interaction);
+      return;
+    }
+
     const target = interaction.options.getUser('user');
 
     if (subcommand === 'assign') {
@@ -288,10 +473,22 @@ async function execute(interaction) {
       return;
     }
 
+    if (subcommand === 'main') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.editReply(await changeMain(interaction, { targetId: target.id }));
+      return;
+    }
+
     await interaction.reply({
       content: remove(interaction, { targetId: target.id }),
       flags: MessageFlags.Ephemeral
     });
+    return;
+  }
+
+  if (subcommand === 'main') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.editReply(await changeMain(interaction, { targetId: interaction.user.id }));
     return;
   }
 
@@ -335,6 +532,8 @@ module.exports = {
   // Everyone can claim their own characters; assigning somebody else's is a
   // moderator action, so it stays out of the public help post.
   adminSubcommands: ['manage'],
+  changeMain,
+  describeNickname,
   buildListEmbed,
   characterLine,
   execute

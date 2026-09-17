@@ -418,3 +418,66 @@ describe('component routing', () => {
     }
   });
 });
+
+describe('admin-only lockdown', () => {
+  /** Runs `body` with ADMIN_ONLY forced to `value`, then restores it. */
+  async function withAdminOnly(value, body) {
+    const previous = process.env.ADMIN_ONLY;
+    process.env.ADMIN_ONLY = value;
+
+    try {
+      await body();
+    } finally {
+      if (previous === undefined) delete process.env.ADMIN_ONLY;
+      else process.env.ADMIN_ONLY = previous;
+    }
+  }
+
+  it('refuses a command from somebody without Manage Server', async () => {
+    // The registration flag only hides commands; a guild can override it, so
+    // this is the check that actually holds.
+    await withAdminOnly('true', async () => {
+      const execute = jest.fn();
+      const interaction = createInteraction({
+        commandName: 'token',
+        commands: new Map([['token', { execute }]]),
+        permissions: false
+      });
+
+      await handleInteraction(interaction);
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(interaction.reply).toHaveBeenCalled();
+    });
+  });
+
+  it('allows an admin through', async () => {
+    await withAdminOnly('true', async () => {
+      const execute = jest.fn(async () => {});
+      const interaction = createInteraction({
+        commandName: 'token',
+        commands: new Map([['token', { execute }]]),
+        permissions: true
+      });
+
+      await handleInteraction(interaction);
+
+      expect(execute).toHaveBeenCalled();
+    });
+  });
+
+  it('lets everyone through again once the lock is lifted', async () => {
+    await withAdminOnly('false', async () => {
+      const execute = jest.fn(async () => {});
+      const interaction = createInteraction({
+        commandName: 'token',
+        commands: new Map([['token', { execute }]]),
+        permissions: false
+      });
+
+      await handleInteraction(interaction);
+
+      expect(execute).toHaveBeenCalled();
+    });
+  });
+});

@@ -3,6 +3,8 @@ jest.mock('fs');
 const fs = require('fs');
 const {
   MAX_CHARACTERS_PER_USER,
+  mainFor,
+  setMain,
   buildOwnerIndex,
   characterKey,
   charactersFor,
@@ -236,5 +238,88 @@ describe('buildOwnerIndex', () => {
 
   it('is empty when nobody has linked, which reports must tolerate', () => {
     expect(buildOwnerIndex({}).size).toBe(0);
+  });
+});
+
+describe('main characters', () => {
+  it('makes the first linked character the main', () => {
+    fileMissing();
+    linkCharacter('user-1', BUTUD);
+
+    expect(written()['user-1'][0].main).toBe(true);
+  });
+
+  it('leaves the main alone when a second character is added', () => {
+    fileContains({ 'user-1': [{ ...BUTUD, main: true }] });
+    linkCharacter('user-1', { ...BUTUD, name: 'Alt' });
+
+    const stored = written()['user-1'];
+
+    expect(stored.find(c => c.name === 'Butud').main).toBe(true);
+    expect(stored.find(c => c.name === 'Alt').main).toBe(false);
+  });
+
+  it('collapses two mains down to one', () => {
+    // Everything downstream assumes exactly one; two would give an unstable
+    // nickname.
+    const links = normalizeLinks({
+      'user-1': [
+        { ...BUTUD, name: 'A', main: true },
+        { ...BUTUD, name: 'B', main: true }
+      ]
+    });
+
+    expect(links['user-1'].filter(c => c.main)).toHaveLength(1);
+  });
+
+  it('promotes somebody when none is flagged', () => {
+    const links = normalizeLinks({ 'user-1': [{ ...BUTUD, name: 'A' }, { ...BUTUD, name: 'B' }] });
+
+    expect(links['user-1'][0].main).toBe(true);
+  });
+
+  it('promotes a replacement when the main is unlinked', () => {
+    fileContains({
+      'user-1': [{ ...BUTUD, main: true }, { ...BUTUD, name: 'Alt', main: false }]
+    });
+
+    unlinkCharacter('user-1', { name: 'Butud' });
+
+    expect(written()['user-1'][0]).toMatchObject({ name: 'Alt', main: true });
+  });
+
+  it('moves the main on request', () => {
+    fileContains({
+      'user-1': [{ ...BUTUD, main: true }, { ...BUTUD, name: 'Alt', main: false }]
+    });
+
+    expect(setMain('user-1', { name: 'Alt' })).toMatchObject({ changed: true });
+    expect(written()['user-1'].find(c => c.main).name).toBe('Alt');
+  });
+
+  it('reports a character the person has not linked', () => {
+    fileContains({ 'user-1': [{ ...BUTUD, main: true }] });
+
+    expect(setMain('user-1', { name: 'Nobody' })).toMatchObject({
+      changed: false,
+      reason: 'not-linked'
+    });
+  });
+
+  it('reports a character that is already the main, without rewriting', () => {
+    fileContains({ 'user-1': [{ ...BUTUD, main: true }] });
+
+    expect(setMain('user-1', { name: 'Butud' })).toMatchObject({ reason: 'already-main' });
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it('reads back the main', () => {
+    fileContains({ 'user-1': [{ ...BUTUD, main: false }, { ...BUTUD, name: 'Alt', main: true }] });
+    expect(mainFor('user-1').name).toBe('Alt');
+  });
+
+  it('is null for somebody who has linked nothing', () => {
+    fileMissing();
+    expect(mainFor('nobody')).toBeNull();
   });
 });

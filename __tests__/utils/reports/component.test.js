@@ -31,7 +31,19 @@ function interaction({ customId = `${ROSTER_BUTTON_PREFIX}${KEY}`, dmFails = fal
     customId,
     isButton: () => true,
     isModalSubmit: () => false,
-    guild: guild ?? { id: 'g1', members: { fetch: jest.fn(async () => new Map([['u1', {}]])) } },
+    guild:
+      guild ??
+      {
+        id: 'g1',
+        members: {
+          fetch: jest.fn(async () =>
+            new Map([
+              ['u1', { id: 'u1', displayName: 'Ken', user: {} }],
+              ['u9', { id: 'u9', displayName: 'NewFriend', user: {} }]
+            ])
+          )
+        }
+      },
     user: {
       id: 'presser',
       send: jest.fn(async () => {
@@ -95,9 +107,38 @@ describe('buildBreakdownEmbed', () => {
     unlinked: [{ name: 'Stranger' }]
   };
 
-  it('leads with the counts', () => {
+  it('leads with a headcount, not a character count', () => {
+    // Two characters owned by one account are one person.
+    const alts = {
+      onDiscord: [{ name: 'Butud', userId: 'u1' }, { name: 'Alt', userId: 'u1' }],
+      left: [],
+      unlinked: []
+    };
+
+    const embed = buildBreakdownEmbed({ guild: { name: 'Apex' }, split: alts }).toJSON();
+
+    expect(embed.description).toContain('1 person is');
+    expect(embed.description).toContain('from 2 characters');
+  });
+
+  it('counts unclaimed characters apart, since nobody knows whose they are', () => {
     const embed = buildBreakdownEmbed({ guild: { name: 'Apex' }, split }).toJSON();
-    expect(embed.description).toContain('**1** of 3');
+    expect(embed.description).toContain('claimed by nobody');
+  });
+
+  it('lists people who are in the server but not on the roster', () => {
+    const embed = buildBreakdownEmbed({
+      guild: { name: 'Apex' },
+      split,
+      outsiders: [{ id: 'u9', name: 'NewFriend' }]
+    }).toJSON();
+
+    expect(embed.fields.find(f => f.name.includes('not in the guild')).value).toContain('NewFriend');
+  });
+
+  it('omits that section when everybody in the server is on the roster', () => {
+    const embed = buildBreakdownEmbed({ guild: { name: 'Apex' }, split, outsiders: [] }).toJSON();
+    expect(embed.fields.some(f => f.name.includes('not in the guild'))).toBe(false);
   });
 
   it('keeps the three groups apart', () => {
@@ -153,7 +194,16 @@ describe('handleComponent', () => {
 
     const embed = fake.user.send.mock.calls[0][0].embeds[0].toJSON();
 
-    expect(embed.description).toContain('**1** of 2');
+    expect(embed.description).toContain('1 person is');
+  });
+
+  it('names server members who hold no roster character', async () => {
+    const fake = interaction();
+    await handleComponent(fake);
+
+    const embed = fake.user.send.mock.calls[0][0].embeds[0].toJSON();
+
+    expect(embed.fields.find(f => f.name.includes('not in the guild')).value).toContain('NewFriend');
   });
 
   it('says so when there is no stored roster yet', async () => {

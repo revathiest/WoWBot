@@ -27,7 +27,8 @@ JSON files under `data/` hold settings and last week's snapshots; everything els
 | `/audit <character> [realm] [game] [region]` | Raid-readiness check — finds missing enchants on the slots TBC actually enchants. |
 | `/report status \| now \| post \| track \| untrack \| configure …` | The guild report: track guilds, set the channel and schedule, and preview or post on demand. Requires Manage Server. |
 | `/iam add \| remove \| list \| forget` | Link your characters so reports mention you instead of just naming the character. Optional, and open to everyone. |
-| `/iam manage assign \| unassign` | Link a character to another member on their behalf. Requires Manage Server. |
+| `/iam main` | Choose which of your characters you are known by. |
+| `/iam manage assign \| unassign \| main \| nicknames \| sync` | Manage other members' characters and nicknames. Requires Manage Server. |
 | `/help show \| setup \| unlock \| status` | Lists every command. `setup` posts them to a read-only channel. |
 | `/auditlog status \| channel \| enabled \| verbosity` | Records what the bot does to a hidden, admin-only channel. Requires Manage Server. |
 | `/autokick status \| preview \| run \| configure …` | Removes members who never pick a role, after a reminder DM. Requires Manage Server. |
@@ -89,18 +90,21 @@ alone — pointing the report at a busy channel by mistake costs nobody their co
 
 ### Who is on Discord
 
-Each report carries two counts — **on Discord** and **not on Discord** — and a button that DMs
-you the full breakdown, so the report itself stays short. The breakdown splits three ways:
+Each report carries a headcount — **people** on Discord, not characters, so alts collapse — and a
+button that DMs the full breakdown. The report stays short; the names go to whoever asks.
 
 | Group | Meaning |
 | --- | --- |
-| 🟢 On Discord | The character is linked, and that account is still in the server. |
-| 🚪 Left the server | The character is linked, but the account is gone. |
-| ⚪ Not linked | Nobody has claimed the character. |
+| 🟢 On Discord | Linked, and that account is still in the server. Counted as **people**. |
+| 🚪 Left the server | Linked, but the account is gone. |
+| ⚪ Not linked | Nobody has claimed the character. Counted as **characters**. |
+| 👋 In Discord, not in the guild | In the server with no character on the roster. |
 
-The last group is the honest limit of what the bot knows: it can only connect a character to an
-account when somebody claims it with `/iam add` or an admin assigns it with
-`/iam manage assign`, so anyone in that list may well be in the server without having done so.
+Unclaimed characters are counted separately rather than folded into the headcount, because five
+unassigned alts of one person would otherwise read as five people. That is also the honest limit
+of what the bot knows: it can only connect a character to an account when somebody claims it with
+`/iam add` or an admin assigns it with `/iam manage assign`. Assigning characters is what turns
+the number from a guess into a fact.
 
 `/report status` shows what is tracked, where each guild posts, and when the next report is due.
 
@@ -363,6 +367,70 @@ channel is misconfigured, the bot warns in its console and carries on.
 
 Spam enforcement and the onboarding sweep keep their own detailed alert channels for reviewing a
 single decision; this is the flat feed of everything.
+
+---
+
+## Locked to administrators
+
+**Every command currently requires the Manage Server permission**, including the ones that used
+to be open to everyone. This is a deliberate rollout lock, and it is one setting:
+
+```
+ADMIN_ONLY=false
+```
+
+Set that in the environment and restart, and these eleven commands go back to being public:
+
+`/arena` `/audit` `/character` `/guild` `/help` `/iam` `/item` `/mythicplus` `/realm` `/realms`
+`/token`
+
+That list lives in `PUBLIC_COMMANDS` in [config/index.js](config/index.js) so it cannot be lost.
+Two of them keep their own internal gating either way: `/help setup` and `/help unlock` are
+admin-only, as is everything under `/iam manage`.
+
+The lock is applied twice on purpose — once on the registration, so ordinary members do not see
+the commands at all, and once in the interaction handler, because a server can override the
+permission Discord displays. The second is the one that actually holds.
+
+> The help post still lists the public commands while the lock is on. That is deliberate: an
+> empty help channel during a rollout is worse than one that shows what is coming.
+
+---
+
+## Characters, mains, and nicknames
+
+Members claim their own characters, and admins can do it on their behalf:
+
+```
+/iam add character:Butud                        # claim your own
+/iam manage assign user:@Ken character:Butud    # or an admin does it for them
+/iam main character:Butud                       # choose who you are known by
+```
+
+The **first character somebody links automatically becomes their main**, and there is always
+exactly one — unlinking a main promotes another. The main is what gives the bot a headcount: three
+characters on one account are one person.
+
+### Nicknames
+
+```
+/iam manage nicknames value:true
+/iam manage sync              # preview who would be renamed
+/iam manage sync apply:true   # do it
+```
+
+With this on, a member's Discord nickname is set to their main character's name — when a character
+is assigned, when their main changes, and when they rejoin the server (Discord discards nicknames
+on leave).
+
+> ⚠️ **The bot cannot rename everybody, and this is not a bug.** Discord never allows renaming the
+> server owner, and it refuses anyone whose highest role sits at or above the bot's own — which
+> usually means your officers. `sync` lists exactly who it had to skip and why, rather than
+> quietly doing nothing. Moving the bot's role higher fixes the second case; nothing fixes the
+> first.
+
+`sync` previews by default and only renames with `apply:true`, since it changes how every linked
+member appears to the whole server at once.
 
 ---
 

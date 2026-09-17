@@ -49,7 +49,7 @@ function splitByDiscord(members, realmSlug, owners, presentUserIds = null) {
   return { onDiscord, left, unlinked };
 }
 
-/** Counts for the report header. */
+/** Counts of CHARACTERS. Useful, but not a headcount — see countPeople. */
 function countByDiscord(split) {
   const notOnDiscord = split.left.length + split.unlinked.length;
 
@@ -60,6 +60,54 @@ function countByDiscord(split) {
     unlinked: split.unlinked.length,
     total: split.onDiscord.length + notOnDiscord
   };
+}
+
+/**
+ * Counts of PEOPLE, which is what anyone actually wants to know.
+ *
+ * Alts collapse: three characters linked to one account are one person. That
+ * only works for characters somebody has claimed, so unclaimed ones are
+ * counted apart as `unidentified` rather than folded in. Five unlinked alts
+ * of the same person would otherwise read as five people, and the headline
+ * number would be a guess dressed up as a fact.
+ */
+function countPeople(split) {
+  const onDiscord = new Set(split.onDiscord.map(character => character.userId));
+  const left = new Set(split.left.map(character => character.userId));
+
+  return {
+    onDiscord: onDiscord.size,
+    left: left.size,
+    // Each unclaimed character might be an alt of somebody already counted,
+    // or a person nobody has reached. The bot cannot tell which.
+    unidentified: split.unlinked.length,
+    known: onDiscord.size + left.size
+  };
+}
+
+/**
+ * Discord members with no character on this roster.
+ *
+ * The other direction: ex-guildies, friends, and people who joined the server
+ * but never linked anything. Bots are excluded — they are never guild members
+ * and would be noise in every list.
+ *
+ * @param {Iterable} members  GuildMembers currently in the server.
+ * @param {Set}      onRoster Discord user ids that DO hold a roster character.
+ */
+function discordOnly(members, onRoster) {
+  return [...members]
+    .filter(member => !member.user?.bot)
+    .filter(member => !onRoster.has(member.id))
+    .map(member => ({
+      id: member.id,
+      name: member.displayName ?? member.user?.username ?? member.id
+    }));
+}
+
+/** The user ids that hold at least one character on the roster. */
+function rosterUserIds(split) {
+  return new Set([...split.onDiscord, ...split.left].map(character => character.userId));
 }
 
 /**
@@ -79,4 +127,11 @@ async function fetchPresentUserIds(guild) {
   }
 }
 
-module.exports = { countByDiscord, fetchPresentUserIds, splitByDiscord };
+module.exports = {
+  countByDiscord,
+  countPeople,
+  discordOnly,
+  fetchPresentUserIds,
+  rosterUserIds,
+  splitByDiscord
+};

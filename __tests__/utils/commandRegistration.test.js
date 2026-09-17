@@ -1,5 +1,5 @@
 const path = require('path');
-const { Routes } = require('discord.js');
+const { PermissionFlagsBits, Routes } = require('discord.js');
 const {
   COMMANDS_DIR,
   clearGlobalCommands,
@@ -28,7 +28,16 @@ function fakeCommand(name) {
 }
 
 const oneCommand = () => new Map([['token', fakeCommand('token')]]);
-const body = [{ name: 'token', description: 'token description' }];
+
+// Every definition is stamped with Manage Server while the bot is locked down,
+// which is the shipped default. See PUBLIC_COMMANDS in config/ for the revert.
+const body = [
+  {
+    name: 'token',
+    description: 'token description',
+    default_member_permissions: String(PermissionFlagsBits.ManageGuild)
+  }
+];
 
 beforeEach(() => {
   jest.spyOn(console, 'log').mockImplementation(() => {});

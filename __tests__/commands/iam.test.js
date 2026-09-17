@@ -5,8 +5,16 @@ jest.mock('../../utils/reports/links', () => ({
   charactersFor: jest.fn(),
   forget: jest.fn(),
   linkCharacter: jest.fn(),
+  mainFor: jest.fn(),
+  setMain: jest.fn(),
   unlinkCharacter: jest.fn()
 }));
+jest.mock('../../utils/nicknames/config', () => ({
+  ...jest.requireActual('../../utils/nicknames/config'),
+  loadConfig: jest.fn(),
+  saveConfig: jest.fn()
+}));
+jest.mock('../../utils/nicknames/sync');
 
 const { getCharacterProfile } = require('../../utils/blizzard/profile');
 const { resolveRealm } = require('../../utils/blizzard/realms');
@@ -15,8 +23,11 @@ const {
   charactersFor,
   forget,
   linkCharacter,
+  setMain,
   unlinkCharacter
 } = require('../../utils/reports/links');
+const { loadConfig: loadNicknameConfig, saveConfig: saveNicknameConfig } = require('../../utils/nicknames/config');
+const { planGuild, syncGuild, syncMember } = require('../../utils/nicknames/sync');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/iam');
 const { createInteraction } = require('../helpers/interaction');
@@ -60,6 +71,11 @@ beforeEach(() => {
   unlinkCharacter.mockReturnValue({ removed: true, characters: [] });
   charactersFor.mockReturnValue([]);
   forget.mockReturnValue({ removed: 1 });
+  setMain.mockReturnValue({ changed: true, reason: null, main: { name: 'Butud' } });
+  loadNicknameConfig.mockReturnValue({ enabled: false, lastSyncAt: null });
+  syncMember.mockResolvedValue(null);
+  planGuild.mockReturnValue([]);
+  syncGuild.mockResolvedValue({ renamed: [], skipped: [] });
 });
 
 describe('command shape', () => {
@@ -67,11 +83,12 @@ describe('command shape', () => {
     expect(command.data.toJSON().default_member_permissions).toBeUndefined();
   });
 
-  it('offers add, remove, list, forget, and the admin manage group', () => {
+  it('offers the self-service subcommands plus the admin manage group', () => {
     expect(command.data.toJSON().options.map(option => option.name)).toEqual([
       'add',
       'remove',
       'list',
+      'main',
       'forget',
       'manage'
     ]);
@@ -321,5 +338,147 @@ describe('/iam manage', () => {
     await command.execute(fake);
 
     expect(said(fake)).toContain('not linked to <@user-9>');
+  });
+});
+
+describe('/iam main', () => {
+  it('moves your own main', async () => {
+    const fake = interaction({ subcommand: 'main', options: { character: 'Alt' } });
+    await command.execute(fake);
+
+    expect(setMain).toHaveBeenCalledWith('user-1', { name: 'Alt', realm: null });
+    expect(said(fake)).toContain('your main');
+  });
+
+  it('reports a character you have not linked', async () => {
+    setMain.mockReturnValue({ changed: false, reason: 'not-linked', main: null });
+    const fake = interaction({ subcommand: 'main', options: { character: 'Nobody' } });
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('not linked');
+  });
+
+  it('says so when it is already the main', async () => {
+    setMain.mockReturnValue({ changed: false, reason: 'already-main', main: { name: 'Butud' } });
+    const fake = interaction({ subcommand: 'main', options: { character: 'Butud' } });
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('already');
+  });
+
+  it('renames the member when nickname syncing is on', async () => {
+    loadNicknameConfig.mockReturnValue({ enabled: true });
+    syncMember.mockResolvedValue({ action: 'rename', to: 'Alt' });
+
+    const fake = interaction({ subcommand: 'main', options: { character: 'Alt' } });
+    fake.guild = { id: 'test-guild', members: { fetch: jest.fn(async () => ({ id: 'user-1' })) } };
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('Nickname set to **Alt**');
+  });
+
+  it('says why a rename was refused rather than staying silent', async () => {
+    // Officers usually outrank the bot; that has to be visible.
+    loadNicknameConfig.mockReturnValue({ enabled: true });
+    syncMember.mockResolvedValue({ action: 'skip', reason: 'their highest role is at or above the bot' });
+
+    const fake = interaction({ subcommand: 'main', options: { character: 'Alt' } });
+    fake.guild = { id: 'test-guild', members: { fetch: jest.fn(async () => ({ id: 'user-1' })) } };
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('at or above the bot');
+  });
+});
+
+describe('/iam manage nicknames', () => {
+  it('turns syncing on and warns about who cannot be renamed', async () => {
+    const fake = interaction({
+      subcommand: 'nicknames',
+      subcommandGroup: 'manage',
+      options: { value: true }
+    });
+
+    await command.execute(fake);
+
+    expect(saveNicknameConfig).toHaveBeenCalledWith({ enabled: true });
+    expect(said(fake)).toContain('server owner');
+  });
+
+  it('turns it off without reverting existing nicknames', async () => {
+    const fake = interaction({
+      subcommand: 'nicknames',
+      subcommandGroup: 'manage',
+      options: { value: false }
+    });
+
+    await command.execute(fake);
+
+    expect(saveNicknameConfig).toHaveBeenCalledWith({ enabled: false });
+    expect(said(fake)).toContain('not reverted');
+  });
+});
+
+describe('/iam manage sync', () => {
+  function syncInteraction(options = {}) {
+    const fake = interaction({ subcommand: 'sync', subcommandGroup: 'manage', options });
+
+    fake.guild = {
+      id: 'test-guild',
+      members: { fetch: jest.fn(async () => new Map([['u1', { id: 'u1', displayName: 'Ken' }]])) }
+    };
+
+    return fake;
+  }
+
+  it('previews by default, changing nothing', async () => {
+    planGuild.mockReturnValue([
+      { member: { id: 'u1', displayName: 'Ken' }, action: 'rename', from: 'Ken', to: 'Butud' }
+    ]);
+
+    const fake = syncInteraction();
+    await command.execute(fake);
+
+    expect(syncGuild).not.toHaveBeenCalled();
+    expect(said(fake)).toContain('Preview');
+    expect(said(fake)).toContain('Butud');
+  });
+
+  it('renames for real when applied', async () => {
+    planGuild.mockReturnValue([
+      { member: { id: 'u1', displayName: 'Ken' }, action: 'rename', from: 'Ken', to: 'Butud' }
+    ]);
+    syncGuild.mockResolvedValue({ renamed: [{ to: 'Butud' }], skipped: [] });
+
+    const fake = syncInteraction({ apply: true });
+    await command.execute(fake);
+
+    expect(syncGuild).toHaveBeenCalled();
+    expect(said(fake)).toContain('Renamed **1**');
+  });
+
+  it('lists who could not be renamed, but not the ones already correct', async () => {
+    planGuild.mockReturnValue([
+      { member: { id: 'u1', displayName: 'Fine' }, action: 'skip', reason: 'already correct' },
+      { member: { id: 'u2', displayName: 'Officer' }, action: 'skip', reason: 'their highest role is at or above the bot' }
+    ]);
+
+    const fake = syncInteraction();
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('Officer');
+    expect(said(fake)).not.toContain('Fine');
+  });
+
+  it('reports a member list it cannot read', async () => {
+    const fake = syncInteraction();
+    fake.guild.members.fetch.mockRejectedValue(new Error('Missing Intents'));
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('Could not read the member list');
   });
 });

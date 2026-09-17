@@ -8,7 +8,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 
 const { characterKey } = require('./links');
-const { countByDiscord, splitByDiscord } = require('./membership');
+const { countPeople, splitByDiscord } = require('./membership');
 const { discordTimestamp, factionColor, formatNumber } = require('../wow');
 
 // Discord's hard limits. Exceeding any of them rejects the whole message, so
@@ -19,6 +19,11 @@ const MAX_FIELD_LENGTH = 1024;
 // to feel complete for a normal week, short enough to stay readable on a phone.
 const MAX_LISTED = 10;
 const MAX_LADDER_LISTED = 5;
+
+/** "1 person" / "3 people" — the counts read as prose, so they have to agree. */
+function countOf(value, singular, plural) {
+  return `${formatNumber(value)} ${value === 1 ? singular : plural}`;
+}
 
 /** "+150" / "-20"; zero is not worth printing as a change. */
 function formatChange(value) {
@@ -189,16 +194,26 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUser
   );
 
   // Headline numbers only. Who they actually are is a button press away, so the
-  // report does not turn into a wall of names every week.
-  const counts = countByDiscord(
-    splitByDiscord(diff.members ?? [], realmSlug, owners, presentUserIds)
-  );
+  // report does not turn into a wall of names.
+  const split = splitByDiscord(diff.members ?? [], realmSlug, owners, presentUserIds);
+  const people = countPeople(split);
 
-  if (counts.total > 0) {
+  if (diff.members?.length > 0) {
+    // People and characters are different units and are labelled as such: alts
+    // collapse into one person, but an unclaimed character cannot be collapsed
+    // into anything, because nobody knows whose it is.
     embed.addFields(
-      { name: '🟢 On Discord', value: formatNumber(counts.onDiscord), inline: true },
-      { name: '⚪ Not on Discord', value: formatNumber(counts.notOnDiscord), inline: true },
-      { name: '​', value: '​', inline: true }
+      { name: '🟢 On Discord', value: countOf(people.onDiscord, 'person', 'people'), inline: true },
+      {
+        name: '⚪ Unclaimed',
+        value: countOf(people.unidentified, 'character', 'characters'),
+        inline: true
+      },
+      {
+        name: people.left > 0 ? '🚪 Left Discord' : '​',
+        value: people.left > 0 ? countOf(people.left, 'person', 'people') : '​',
+        inline: true
+      }
     );
   }
 
@@ -262,6 +277,7 @@ module.exports = {
   MAX_LISTED,
   buildReportEmbed,
   buildRosterComponents,
+  countOf,
   describePeriod,
   formatChange,
   guildLabel,

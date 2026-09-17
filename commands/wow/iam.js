@@ -332,6 +332,9 @@ module.exports = {
   data,
   help: 'Links your WoW characters to your Discord account for weekly reports.',
   category: 'WoW',
+  // Everyone can claim their own characters; assigning somebody else's is a
+  // moderator action, so it stays out of the public help post.
+  adminSubcommands: ['manage'],
   buildListEmbed,
   characterLine,
   execute

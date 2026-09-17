@@ -253,6 +253,8 @@ module.exports = {
   data,
   help: 'Lists every command, and manages the read-only help channel.',
   category: 'Help',
+  // /help show is for everybody; managing the channel is not.
+  adminSubcommands: ['setup', 'unlock'],
   buildStatusEmbed,
   describeLock,
   execute

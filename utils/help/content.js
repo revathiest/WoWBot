@@ -81,16 +81,33 @@ function truncate(value, limit) {
 }
 
 /**
+ * Whether a subcommand is one only admins can run.
+ *
+ * A command can be public overall while some of its subcommands are not:
+ * `/iam` is for everybody but `/iam manage assign` is not, and `/help show` is
+ * for everybody but `/help setup` is not. Commands declare those by exporting
+ * `adminSubcommands`, matched on the leading segment so naming a whole group
+ * covers everything inside it.
+ */
+function isAdminSubcommand(command, subcommandName) {
+  const admin = command.adminSubcommands ?? [];
+  return admin.some(entry => subcommandName === entry || subcommandName.startsWith(`${entry} `));
+}
+
+/**
  * One command as an embed field: what it does, then how it breaks down.
  *
  * Subcommands are what make a command like /report or /ticket usable at all —
- * "Configures the weekly guild report" tells nobody where to start. They are
- * indented with an em space so the eye can separate them from the description
- * without a bullet character fighting the command names.
+ * "Configures the guild report" tells nobody where to start. They are indented
+ * with an em space so the eye can separate them from the description without a
+ * bullet character fighting the command names.
  */
-function commandField(name, command) {
+function commandField(name, command, { includeAdmin = true } = {}) {
   const description = command.help ?? command.data?.description ?? 'No description.';
-  const subcommands = subcommandsOf(command);
+
+  const subcommands = subcommandsOf(command).filter(
+    sub => includeAdmin || !isAdminSubcommand(command, sub.name)
+  );
 
   const lines = [description];
 
@@ -234,7 +251,7 @@ function buildSectionMessages(commands, { includeAdmin = true } = {}) {
     startEmbed();
 
     for (const [name, command] of entries) {
-      const field = commandField(name, command);
+      const field = commandField(name, command, { includeAdmin });
       const fieldCount = (embed.toJSON().fields ?? []).length;
 
       const overflows =
@@ -341,6 +358,7 @@ module.exports = {
   fingerprint,
   forAudience,
   groupByCategory,
+  isAdminSubcommand,
   messageLink,
   styleFor,
   subcommandsOf,

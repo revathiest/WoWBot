@@ -11,6 +11,7 @@ const {
   commandField,
   embedLength,
   groupByCategory,
+  isAdminSubcommand,
   messageLink,
   subcommandsOf
 } = require('../../../utils/help/content');
@@ -78,6 +79,35 @@ describe('commandField', () => {
   it('lists subcommands, since a bare description does not say where to start', () => {
     const field = commandField('ticket', command({ subcommands: ['status'] }));
     expect(field.value).toContain('`status`');
+  });
+
+  it('hides admin-only subcommands from the public post', () => {
+    // /iam is for everybody, but /iam manage assign is not — a command can be
+    // public overall while parts of it are not.
+    const iam = command({ subcommands: ['add'], groups: [{ name: 'manage', child: 'assign' }] });
+    iam.adminSubcommands = ['manage'];
+
+    const field = commandField('iam', iam, { includeAdmin: false });
+
+    expect(field.value).toContain('`add`');
+    expect(field.value).not.toContain('manage assign');
+  });
+
+  it('shows them to an audience that can run them', () => {
+    const iam = command({ subcommands: ['add'], groups: [{ name: 'manage', child: 'assign' }] });
+    iam.adminSubcommands = ['manage'];
+
+    expect(commandField('iam', iam, { includeAdmin: true }).value).toContain('manage assign');
+  });
+
+  it('matches a named group without matching a similarly-named subcommand', () => {
+    const fake = command({ subcommands: ['set', 'setup'] });
+    fake.adminSubcommands = ['setup'];
+
+    const field = commandField('thing', fake, { includeAdmin: false });
+
+    expect(field.value).toContain('`set`');
+    expect(field.value).not.toContain('`setup`');
   });
 
   it('never exceeds a field value limit', () => {
@@ -150,6 +180,20 @@ describe('buildHeaderEmbed', () => {
   it('counts the commands in the footer', () => {
     const embed = buildHeaderEmbed(commandMap([['a', {}], ['b', {}]])).toJSON();
     expect(embed.footer.text).toBe('2 commands available');
+  });
+});
+
+describe('isAdminSubcommand', () => {
+  it('is false when a command declares nothing', () => {
+    expect(isAdminSubcommand({}, 'anything')).toBe(false);
+  });
+
+  it('matches a whole group by its leading segment', () => {
+    expect(isAdminSubcommand({ adminSubcommands: ['manage'] }, 'manage assign')).toBe(true);
+  });
+
+  it('does not match a different subcommand that merely starts the same', () => {
+    expect(isAdminSubcommand({ adminSubcommands: ['set'] }, 'setup')).toBe(false);
   });
 });
 

@@ -1,17 +1,21 @@
 jest.mock('../../../utils/reports/history');
 jest.mock('../../../utils/reports/links', () => ({
   ...jest.requireActual('../../../utils/reports/links'),
-  buildOwnerIndex: jest.fn()
+  buildOwnerIndex: jest.fn(),
+  mainFor: jest.fn()
 }));
 
 const { loadSnapshot } = require('../../../utils/reports/history');
-const { buildOwnerIndex, characterKey } = require('../../../utils/reports/links');
+const { buildOwnerIndex, characterKey, mainFor } = require('../../../utils/reports/links');
 const { ROSTER_BUTTON_PREFIX } = require('../../../utils/reports/render');
 const {
-  MAX_FIELDS_PER_GROUP,
+  MAX_LINES_PER_GROUP,
   buildBreakdownEmbed,
+  groupByOwner,
   handleComponent,
-  nameFields
+  packLines,
+  personLines,
+  unclaimedLines
 } = require('../../../utils/reports/component');
 
 const KEY = 'us:anniversary:nightslayer:apex';
@@ -69,42 +73,143 @@ beforeEach(() => {
   buildOwnerIndex.mockReturnValue(
     new Map([[characterKey({ name: 'Butud', realm: 'nightslayer' }), 'u1']])
   );
+  mainFor.mockReturnValue(null);
 });
 
 afterEach(() => jest.restoreAllMocks());
 
-describe('nameFields', () => {
+describe('packLines', () => {
   it('is empty for an empty group, so the embed skips it', () => {
-    expect(nameFields('On Discord', [])).toEqual([]);
+    expect(packLines('On Discord', [])).toEqual([]);
   });
 
   it('counts the group in the field name', () => {
-    const [field] = nameFields('On Discord', [{ name: 'A' }, { name: 'B' }], { emoji: '🟢' });
+    const [field] = packLines('On Discord', ['a', 'b'], { emoji: '🟢' });
     expect(field.name).toBe('🟢 On Discord (2)');
   });
 
-  it('splits a long list across fields rather than exceeding the limit', () => {
-    const members = Array.from({ length: 300 }, (_, i) => ({ name: `Character${i}` }));
-    const fields = nameFields('Not linked', members);
-
-    fields.forEach(field => expect(field.value.length).toBeLessThanOrEqual(1024));
-    expect(fields.length).toBeGreaterThan(1);
+  it('uses a supplied total, so people can be counted rather than lines', () => {
+    const [field] = packLines('On Discord', ['a', 'b', 'c'], { total: '2 people' });
+    expect(field.name).toBe(' On Discord (2 people)');
   });
 
-  it('caps the number of fields and says how many were dropped', () => {
-    const members = Array.from({ length: 2000 }, (_, i) => ({ name: `Character${i}` }));
-    const fields = nameFields('Not linked', members);
+  it('puts one entry per line', () => {
+    expect(packLines('x', ['a', 'b'])[0].value).toBe('a\nb');
+  });
 
-    expect(fields.length).toBeLessThanOrEqual(MAX_FIELDS_PER_GROUP);
-    expect(fields.at(-1).value).toContain('more');
+  it('stops at a readable number of lines and counts the rest', () => {
+    const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`);
+    const fields = packLines('x', lines);
+
+    expect(fields.at(-1).value).toContain(`${50 - MAX_LINES_PER_GROUP} more`);
+  });
+
+  it('never exceeds a field limit', () => {
+    const lines = Array.from({ length: 20 }, () => 'x'.repeat(200));
+
+    packLines('x', lines).forEach(field => expect(field.value.length).toBeLessThanOrEqual(1024));
+  });
+});
+
+describe('groupByOwner', () => {
+  it('collects one account\'s characters together', () => {
+    const grouped = groupByOwner(
+      [
+        { name: 'Alt', userId: 'u1' },
+        { name: 'Butud', userId: 'u1' },
+        { name: 'Other', userId: 'u2' }
+      ],
+      { resolveMain: () => null }
+    );
+
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].characters).toHaveLength(2);
+  });
+
+  it('puts the main first, wherever it appeared', () => {
+    const grouped = groupByOwner(
+      [
+        { name: 'Alt', userId: 'u1', level: 70 },
+        { name: 'Butud', userId: 'u1', level: 70 }
+      ],
+      { resolveMain: () => ({ name: 'Butud' }) }
+    );
+
+    expect(grouped[0].characters[0].name).toBe('Butud');
+  });
+
+  it('falls back to level order when no main is known', () => {
+    const grouped = groupByOwner(
+      [
+        { name: 'Low', userId: 'u1', level: 1 },
+        { name: 'High', userId: 'u1', level: 70 }
+      ],
+      { resolveMain: () => null }
+    );
+
+    expect(grouped[0].characters.map(c => c.name)).toEqual(['High', 'Low']);
+  });
+});
+
+describe('personLines', () => {
+  it('shows which Discord account plays which characters', () => {
+    // The whole point of the section: a name alone says nothing about whose it is.
+    const [line] = personLines(
+      [
+        { name: 'Butud', userId: 'u1', level: 70 },
+        { name: 'Alt', userId: 'u1', level: 70 }
+      ],
+      { resolveMain: () => ({ name: 'Butud' }) }
+    );
+
+    expect(line).toBe('<@u1> — **Butud** · Alt');
+  });
+
+  it('omits the separator for somebody with one character', () => {
+    const [line] = personLines([{ name: 'Solo', userId: 'u1' }], { resolveMain: () => null });
+    expect(line).toBe('<@u1> — **Solo**');
+  });
+
+  it('leads with whoever has the most characters', () => {
+    const lines = personLines(
+      [
+        { name: 'Solo', userId: 'u2' },
+        { name: 'A', userId: 'u1' },
+        { name: 'B', userId: 'u1' }
+      ],
+      { resolveMain: () => null }
+    );
+
+    expect(lines[0]).toContain('<@u1>');
+  });
+});
+
+describe('unclaimedLines', () => {
+  it('puts the highest level first, since those are worth chasing', () => {
+    const lines = unclaimedLines([
+      { name: 'Banker', level: 1 },
+      { name: 'Raider', level: 70 }
+    ]);
+
+    expect(lines[0]).toContain('Raider');
+  });
+
+  it('shows the level and class', () => {
+    expect(unclaimedLines([{ name: 'Raider', level: 70, className: 'Rogue' }])[0]).toBe(
+      '`70` **Raider** · Rogue'
+    );
+  });
+
+  it('copes with a character whose level or class is unknown', () => {
+    expect(unclaimedLines([{ name: 'Mystery' }])[0]).toBe('**Mystery**');
   });
 });
 
 describe('buildBreakdownEmbed', () => {
   const split = {
-    onDiscord: [{ name: 'Butud' }],
-    left: [{ name: 'Departed' }],
-    unlinked: [{ name: 'Stranger' }]
+    onDiscord: [{ name: 'Butud', userId: 'u1' }],
+    left: [{ name: 'Departed', userId: 'u2' }],
+    unlinked: [{ name: 'Stranger', level: 70 }]
   };
 
   it('leads with a headcount, not a character count', () => {
@@ -117,8 +222,36 @@ describe('buildBreakdownEmbed', () => {
 
     const embed = buildBreakdownEmbed({ guild: { name: 'Apex' }, split: alts }).toJSON();
 
-    expect(embed.description).toContain('1 person is');
-    expect(embed.description).toContain('from 2 characters');
+    expect(embed.description).toContain('1 person');
+    expect(embed.description).toContain('playing 2 characters');
+  });
+
+  it('names the account beside its characters', () => {
+    const alts = {
+      onDiscord: [{ name: 'Butud', userId: 'u1' }, { name: 'Alt', userId: 'u1' }],
+      left: [],
+      unlinked: []
+    };
+
+    const embed = buildBreakdownEmbed({
+      guild: { name: 'Apex' },
+      split: alts,
+      resolveMain: () => ({ name: 'Butud' })
+    }).toJSON();
+
+    expect(embed.fields[0].value).toBe('<@u1> — **Butud** · Alt');
+  });
+
+  it('counts people, not lines, in the section headers', () => {
+    const alts = {
+      onDiscord: [{ name: 'Butud', userId: 'u1' }, { name: 'Alt', userId: 'u1' }],
+      left: [],
+      unlinked: []
+    };
+
+    const embed = buildBreakdownEmbed({ guild: { name: 'Apex' }, split: alts }).toJSON();
+
+    expect(embed.fields[0].name).toContain('1 person');
   });
 
   it('counts unclaimed characters apart, since nobody knows whose they are', () => {
@@ -133,12 +266,14 @@ describe('buildBreakdownEmbed', () => {
       outsiders: [{ id: 'u9', name: 'NewFriend' }]
     }).toJSON();
 
-    expect(embed.fields.find(f => f.name.includes('not in the guild')).value).toContain('NewFriend');
+    // Rendered as a mention rather than a stored name: clickable, and always
+    // shows whatever they are called right now.
+    expect(embed.fields.find(f => f.name.includes('no character here')).value).toContain('<@u9>');
   });
 
   it('omits that section when everybody in the server is on the roster', () => {
     const embed = buildBreakdownEmbed({ guild: { name: 'Apex' }, split, outsiders: [] }).toJSON();
-    expect(embed.fields.some(f => f.name.includes('not in the guild'))).toBe(false);
+    expect(embed.fields.some(f => f.name.includes('no character here'))).toBe(false);
   });
 
   it('keeps the three groups apart', () => {
@@ -147,22 +282,24 @@ describe('buildBreakdownEmbed', () => {
 
     expect(names.some(n => n.includes('On Discord'))).toBe(true);
     expect(names.some(n => n.includes('left the server'))).toBe(true);
-    expect(names.some(n => n.includes('Not linked'))).toBe(true);
+    expect(names.some(n => n.includes('Claimed by nobody'))).toBe(true);
   });
 
-  it('explains what "not linked" actually means', () => {
+  it('explains what "claimed by nobody" actually means', () => {
     // It is not proof of absence, and the DM must not imply it is.
     const embed = buildBreakdownEmbed({ guild: { name: 'Apex' }, split }).toJSON();
-    expect(embed.fields.find(f => f.name === 'About "not linked"').value).toContain('/iam add');
+    const caveat = embed.fields.find(f => f.name.startsWith('Why'));
+
+    expect(caveat.value).toContain('/iam add');
   });
 
   it('omits that caveat when everyone is linked', () => {
     const embed = buildBreakdownEmbed({
       guild: { name: 'Apex' },
-      split: { onDiscord: [{ name: 'Butud' }], left: [], unlinked: [] }
+      split: { onDiscord: [{ name: 'Butud', userId: 'u1' }], left: [], unlinked: [] }
     }).toJSON();
 
-    expect(embed.fields.some(f => f.name === 'About "not linked"')).toBe(false);
+    expect(embed.fields.some(f => f.name.startsWith('Why'))).toBe(false);
   });
 });
 
@@ -194,7 +331,7 @@ describe('handleComponent', () => {
 
     const embed = fake.user.send.mock.calls[0][0].embeds[0].toJSON();
 
-    expect(embed.description).toContain('1 person is');
+    expect(embed.description).toContain('1 person');
   });
 
   it('names server members who hold no roster character', async () => {
@@ -203,7 +340,7 @@ describe('handleComponent', () => {
 
     const embed = fake.user.send.mock.calls[0][0].embeds[0].toJSON();
 
-    expect(embed.fields.find(f => f.name.includes('not in the guild')).value).toContain('NewFriend');
+    expect(embed.fields.find(f => f.name.includes('no character here')).value).toContain('<@u9>');
   });
 
   it('says so when there is no stored roster yet', async () => {

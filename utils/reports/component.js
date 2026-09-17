@@ -10,20 +10,26 @@
 // the question being asked. "Butud, Alt, Banker, Mindbugger" says nothing about
 // how many people that is, or whose they are; one line per account, main in
 // bold and alts after it, answers both at a glance.
+//
+// EVERYBODY is listed, on both sides — nothing is trimmed to "and 90 more",
+// because the whole point is to work through the list. A guild roster does not
+// fit in one embed, so it spills across fields, then embeds, then messages, and
+// the sections that are just names are laid out as columns to keep it short
+// enough to actually read.
 
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 
+const { packFields, packIntoMessages, toFields } = require('../embeds');
 const { loadSnapshot } = require('./history');
 const { buildOwnerIndex, mainFor } = require('./links');
 const { countPeople, discordOnly, rosterUserIds, splitByDiscord } = require('./membership');
 const { ROSTER_BUTTON_PREFIX } = require('./render');
 const { FALLBACK_COLOR } = require('../wow');
 
-const MAX_FIELD_LENGTH = 1024;
-
-// A DM long enough to scroll is fine; one long enough to give up on is not.
-const MAX_FIELDS_PER_GROUP = 3;
-const MAX_LINES_PER_GROUP = 20;
+// Three inline fields sit side by side in Discord, so capping a column at a
+// dozen lines produces a readable three-column block rather than one very long
+// stripe down the page.
+const COLUMN_LINES = 12;
 
 /** "1 person" / "3 people" */
 function countOf(value, singular, plural) {
@@ -31,48 +37,18 @@ function countOf(value, singular, plural) {
 }
 
 /**
- * Packs lines into field-sized chunks.
+ * A full-width section: one line per entry.
  *
- * Both limits matter: Discord rejects a field over 1024 characters, and a
- * reader gives up well before that many names anyway, so whichever runs out
- * first wins and the remainder becomes a count.
+ * Used where the line carries real structure — an account and its characters —
+ * which would wrap badly in a narrow column.
  */
-function packLines(label, lines, { emoji = '', total = null } = {}) {
-  if (lines.length === 0) return [];
+function blockSection(label, lines) {
+  return toFields(label, lines);
+}
 
-  const capped = lines.slice(0, MAX_LINES_PER_GROUP);
-  let dropped = lines.length - capped.length;
-
-  const fields = [];
-  let current = [];
-  let length = 0;
-
-  // Room for the "…and N more" that may be appended to the last chunk.
-  const limit = MAX_FIELD_LENGTH - 60;
-
-  for (const [index, line] of capped.entries()) {
-    if (current.length > 0 && length + line.length + 1 > limit) {
-      if (fields.length + 1 >= MAX_FIELDS_PER_GROUP) {
-        dropped += capped.length - index;
-        break;
-      }
-
-      fields.push(current);
-      current = [];
-      length = 0;
-    }
-
-    current.push(line);
-    length += line.length + 1;
-  }
-
-  if (current.length > 0) fields.push(current);
-  if (dropped > 0) fields[fields.length - 1].push(`_…and ${dropped} more_`);
-
-  return fields.map((chunk, index) => ({
-    name: index === 0 ? `${emoji} ${label} (${total ?? lines.length})` : `${label} — continued`,
-    value: chunk.join('\n')
-  }));
+/** A three-column section, for lists that are only names. */
+function columnSection(label, lines) {
+  return toFields(label, lines, { inline: true, maxLines: COLUMN_LINES });
 }
 
 /**
@@ -136,56 +112,90 @@ function unclaimedLines(characters) {
     });
 }
 
-/** The DM. */
-function buildBreakdownEmbed({ guild, split, outsiders = [], resolveMain = mainFor }) {
+/** The summary at the top of the first message. */
+function buildSummary(guild, split) {
   const people = countPeople(split);
 
-  const embed = new EmbedBuilder()
-    .setColor(FALLBACK_COLOR)
-    .setTitle(`${guild?.name ?? 'Guild'} — who is on Discord`)
-    .setDescription(
-      [
-        `**${countOf(people.onDiscord, 'person', 'people')}** on Discord, ` +
-          `playing ${countOf(split.onDiscord.length, 'character', 'characters')}.`,
-        `**${countOf(people.unidentified, 'character', 'characters')}** on the roster ` +
-          `${people.unidentified === 1 ? 'is' : 'are'} claimed by nobody.`
-      ].join('\n')
-    );
+  return [
+    `**${countOf(people.onDiscord, 'person', 'people')}** on Discord, ` +
+      `playing ${countOf(split.onDiscord.length, 'character', 'characters')}.`,
+    `**${countOf(people.unidentified, 'character', 'characters')}** on the roster ` +
+      `${people.unidentified === 1 ? 'is' : 'are'} claimed by nobody.`,
+    people.left > 0
+      ? `**${countOf(people.left, 'person', 'people')}** linked here but no longer in the server.`
+      : null
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
-  embed.addFields(
-    ...packLines('On Discord', personLines(split.onDiscord, { resolveMain }), {
-      emoji: '🟢',
-      total: countOf(people.onDiscord, 'person', 'people')
-    }),
-    ...packLines('Linked, but left the server', personLines(split.left, { resolveMain }), {
-      emoji: '🚪',
-      total: countOf(people.left, 'person', 'people')
-    }),
-    ...packLines('Claimed by nobody — chase these', unclaimedLines(split.unlinked), { emoji: '⚪' })
-  );
+/** Every field the breakdown needs, in reading order. */
+function buildFields({ split, outsiders, resolveMain }) {
+  const people = countPeople(split);
 
-  if (outsiders.length > 0) {
-    embed.addFields(
-      ...packLines(
-        'In Discord, no character here',
-        outsiders.map(member => `<@${member.id}>`),
-        { emoji: '👋' }
-      )
-    );
-  }
+  return [
+    // Accounts and their characters: structured, so full width.
+    ...blockSection(
+      `🟢 On Discord (${countOf(people.onDiscord, 'person', 'people')})`,
+      personLines(split.onDiscord, { resolveMain })
+    ),
+    ...blockSection(
+      `🚪 Linked, but left the server (${countOf(people.left, 'person', 'people')})`,
+      personLines(split.left, { resolveMain })
+    ),
+    // Just names: columns, because there are usually a great many.
+    ...columnSection(
+      `⚪ Claimed by nobody — chase these (${split.unlinked.length})`,
+      unclaimedLines(split.unlinked)
+    ),
+    ...columnSection(
+      `👋 In Discord, no character here (${outsiders.length})`,
+      outsiders.map(member => `<@${member.id}>`)
+    ),
+    ...(split.unlinked.length > 0
+      ? [
+          {
+            // The honest caveat: an unclaimed character is not proof of absence.
+            name: 'Why "claimed by nobody" is not "not here"',
+            value:
+              'The bot can only connect a character to an account when somebody claims it ' +
+              'with `/iam add`, or an admin assigns it with `/iam manage assign`. Anyone ' +
+              'above may already be in the server — assigning their character is what turns ' +
+              'a guess into a name.',
+            inline: false
+          }
+        ]
+      : [])
+  ];
+}
 
-  if (split.unlinked.length > 0) {
-    // The honest caveat: an unclaimed character is not proof of absence.
-    embed.addFields({
-      name: 'Why "claimed by nobody" is not "not here"',
-      value:
-        'The bot can only connect a character to an account when somebody claims it with ' +
-        '`/iam add`, or an admin assigns it with `/iam manage assign`. Anyone above may already ' +
-        'be in the server — assigning their character is what turns a guess into a name.'
-    });
-  }
+/**
+ * The whole breakdown, as however many messages it takes.
+ *
+ * @returns {object[][]} one array of embeds per message to send.
+ */
+function buildBreakdownMessages({ guild, split, outsiders = [], resolveMain = mainFor }) {
+  const title = `${guild?.name ?? 'Guild'} — who is on Discord`;
+  const fields = buildFields({ split, outsiders, resolveMain });
 
-  return embed;
+  // Title and summary are added below, after the fields are packed, so their
+  // length has to be held back from the per-embed budget.
+  const reserve = title.length + 20 + buildSummary(guild, split).length;
+
+  const embeds = packFields(fields, (chunk, index) => {
+    const embed = new EmbedBuilder()
+      .setColor(FALLBACK_COLOR)
+      .setTitle(index === 0 ? title : `${title} — continued`)
+      .addFields(chunk);
+
+    // The summary belongs on the first embed only; repeating it would read as
+    // a second, contradictory report.
+    if (index === 0) embed.setDescription(buildSummary(guild, split));
+
+    return embed;
+  }, { reserve });
+
+  return packIntoMessages(embeds);
 }
 
 /**
@@ -232,30 +242,43 @@ async function handleComponent(interaction) {
   const split = splitByDiscord(members, realmSlug, buildOwnerIndex(), presentUserIds);
 
   const outsiders = serverMembers ? discordOnly(serverMembers.values(), rosterUserIds(split)) : [];
-  const embed = buildBreakdownEmbed({ guild: snapshot.guild, split, outsiders });
+  const messages = buildBreakdownMessages({ guild: snapshot.guild, split, outsiders });
 
   try {
-    await interaction.user.send({ embeds: [embed] });
-    await interaction.editReply('📬 Sent you the breakdown by DM.');
+    for (const embeds of messages) await interaction.user.send({ embeds });
+
+    await interaction.editReply(
+      `📬 Sent you the breakdown by DM${messages.length > 1 ? ` — ${messages.length} messages` : ''}.`
+    );
   } catch {
-    // DMs closed is common enough that falling back beats failing.
+    // DMs closed is common enough that falling back beats failing. The reply
+    // takes the first message and follow-ups carry the rest, so nothing is
+    // lost just because somebody keeps their DMs shut.
+    const [first, ...rest] = messages;
+
     await interaction.editReply({
       content: '⚠️ I could not DM you, so here it is instead.',
-      embeds: [embed]
+      embeds: first ?? []
     });
+
+    for (const embeds of rest) {
+      await interaction.followUp({ embeds, flags: MessageFlags.Ephemeral });
+    }
   }
 
   return true;
 }
 
 module.exports = {
-  MAX_FIELDS_PER_GROUP,
-  MAX_LINES_PER_GROUP,
-  buildBreakdownEmbed,
+  COLUMN_LINES,
+  blockSection,
+  buildBreakdownMessages,
+  buildFields,
+  buildSummary,
+  columnSection,
   countOf,
   groupByOwner,
   handleComponent,
-  packLines,
   personLines,
   unclaimedLines
 };

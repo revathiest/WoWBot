@@ -459,13 +459,13 @@ describe('handleComponent', () => {
 });
 
 describe('killTallyLine', () => {
-  it('shows lifetime, 7-day, and today figures together', () => {
+  it('shows today, 7-day, and lifetime figures together, labelled and in that order', () => {
     const line = killTallyLine(
       { name: 'Judgement', surname: 'Judy', today: 12, last7: 40, lifetime: 500 },
       new Map()
     );
 
-    expect(line).toBe('**Judgement Judy** — today **+12** · 7d **+40** · lifetime **500**');
+    expect(line).toBe('**Judgement Judy** — Today **+12** · 7-Day **+40** · Lifetime **500**');
   });
 
   it('shows a dash for an unknown figure rather than a false zero', () => {
@@ -474,8 +474,8 @@ describe('killTallyLine', () => {
       new Map()
     );
 
-    expect(line).toContain('today **—**');
-    expect(line).toContain('7d **—**');
+    expect(line).toContain('Today **—**');
+    expect(line).toContain('7-Day **—**');
   });
 });
 
@@ -487,8 +487,18 @@ describe('buildKillTallyMessages', () => {
     });
 
     expect(allLines(messages)).toContain(
-      '**Judgement Judy** — today **+12** · 7d **+40** · lifetime **500**'
+      '**Judgement Judy** — Today **+12** · 7-Day **+40** · Lifetime **500**'
     );
+  });
+
+  it('keeps the column header in the same order as the lines', () => {
+    const messages = buildKillTallyMessages({
+      guild: { name: 'Apex' },
+      tally: [{ name: 'Judgement', surname: 'Judy', today: 12, last7: 40, lifetime: 500 }]
+    });
+
+    const header = allFields(messages).find(field => field.name.includes('Today'));
+    expect(header.name).toBe('💀 Today · 7-Day · Lifetime');
   });
 
   it('spills across messages rather than truncating, for a large guild', () => {

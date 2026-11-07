@@ -204,17 +204,24 @@ function buildBreakdownMessages({ guild, split, outsiders = [], resolveMain = ma
   return packIntoMessages(embeds);
 }
 
+// The labels, in the one order used EVERYWHERE this tally appears — the
+// column header, every line, and the sort — so nobody has to cross-reference
+// a header against a differently-ordered line to know which number is which.
+const KILL_TALLY_COLUMNS = 'Today · 7-Day · Lifetime';
+
 /**
- * "Judgement Judy (<@111>) — today **+12** · 7d **+40** · lifetime **500**"
+ * "**Judgement Judy** (<@111>) — Today **+12** · 7-Day **+40** · Lifetime **500**"
  *
  * All three figures on every line, rather than one sort order hiding the
- * others — the point of the tally is to see all of it at once.
+ * others — the point of the tally is to see all of it at once. Each number
+ * carries its own label rather than relying on position, since a DM this long
+ * will usually be read without the column header in view.
  */
 function killTallyLine(entry, owners) {
   const today = Number.isFinite(entry.today) ? `+${formatNumber(entry.today)}` : '—';
   const last7 = Number.isFinite(entry.last7) ? `+${formatNumber(entry.last7)}` : '—';
 
-  return `${nameOf(entry, owners)} — today **${today}** · 7d **${last7}** · lifetime **${formatNumber(
+  return `${nameOf(entry, owners)} — Today **${today}** · 7-Day **${last7}** · Lifetime **${formatNumber(
     entry.lifetime
   )}**`;
 }
@@ -228,8 +235,10 @@ function killTallyLine(entry, owners) {
  */
 function buildKillTallyMessages({ guild, tally, owners = new Map() }) {
   const title = `${guild?.name ?? 'Guild'} — honorable kill tally`;
-  const description = `${formatNumber(tally.length)} member(s) with honorable-kill data, sorted by today's gain.`;
-  const fields = toFields('💀 Lifetime · 7 days · today', tally.map(entry => killTallyLine(entry, owners)));
+  const description =
+    `${formatNumber(tally.length)} member(s) with honorable-kill data, sorted by today's gain. ` +
+    `Each line is **${KILL_TALLY_COLUMNS}**.`;
+  const fields = toFields(`💀 ${KILL_TALLY_COLUMNS}`, tally.map(entry => killTallyLine(entry, owners)));
 
   const reserve = title.length + 20 + description.length;
 

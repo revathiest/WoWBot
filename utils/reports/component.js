@@ -16,15 +16,21 @@
 // fit in one embed, so it spills across fields, then embeds, then messages, and
 // the sections that are just names are laid out as columns to keep it short
 // enough to actually read.
+//
+// The second button, "kill tally", DMs the same guild's honorable kills —
+// lifetime, last 7 days, today — for the same reason: a few hundred lines of
+// three numbers apiece has no business in the channel itself.
 
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 
 const { packFields, packIntoMessages, toFields } = require('../embeds');
 const { loadSnapshot } = require('./history');
+const { loadKillHistory } = require('./killHistory');
+const { buildKillTally } = require('./killTally');
 const { buildOwnerIndex, mainFor } = require('./links');
 const { countPeople, discordOnly, rosterUserIds, splitByDiscord } = require('./membership');
-const { ROSTER_BUTTON_PREFIX } = require('./render');
-const { FALLBACK_COLOR } = require('../wow');
+const { KILL_TALLY_BUTTON_PREFIX, ROSTER_BUTTON_PREFIX, nameOf } = require('./render');
+const { FALLBACK_COLOR, formatNumber } = require('../wow');
 
 // Three inline fields sit side by side in Discord, so capping a column at a
 // dozen lines produces a readable three-column block rather than one very long
@@ -199,12 +205,121 @@ function buildBreakdownMessages({ guild, split, outsiders = [], resolveMain = ma
 }
 
 /**
+ * "Judgement Judy (<@111>) — today **+12** · 7d **+40** · lifetime **500**"
+ *
+ * All three figures on every line, rather than one sort order hiding the
+ * others — the point of the tally is to see all of it at once.
+ */
+function killTallyLine(entry, owners) {
+  const today = Number.isFinite(entry.today) ? `+${formatNumber(entry.today)}` : '—';
+  const last7 = Number.isFinite(entry.last7) ? `+${formatNumber(entry.last7)}` : '—';
+
+  return `${nameOf(entry, owners)} — today **${today}** · 7d **${last7}** · lifetime **${formatNumber(
+    entry.lifetime
+  )}**`;
+}
+
+/**
+ * The whole kill tally, as however many messages it takes.
+ *
+ * Sorted by today's gain (see buildKillTally), so whoever is actively
+ * grinding honour right now leads the list; the lifetime and 7-day columns
+ * stay visible on every line rather than needing a second sort to see them.
+ */
+function buildKillTallyMessages({ guild, tally, owners = new Map() }) {
+  const title = `${guild?.name ?? 'Guild'} — honorable kill tally`;
+  const description = `${formatNumber(tally.length)} member(s) with honorable-kill data, sorted by today's gain.`;
+  const fields = toFields('💀 Lifetime · 7 days · today', tally.map(entry => killTallyLine(entry, owners)));
+
+  const reserve = title.length + 20 + description.length;
+
+  const embeds = packFields(
+    fields,
+    (chunk, index) => {
+      const embed = new EmbedBuilder()
+        .setColor(FALLBACK_COLOR)
+        .setTitle(index === 0 ? title : `${title} — continued`)
+        .addFields(chunk);
+
+      if (index === 0) embed.setDescription(description);
+
+      return embed;
+    },
+    { reserve }
+  );
+
+  return packIntoMessages(embeds);
+}
+
+/**
+ * Handles the kill-tally button.
+ *
+ * Re-derives the same tally `buildGuildReport` showed at posting time, rather
+ * than hitting the Blizzard API again: the latest kill-history entry IS this
+ * stored snapshot's kills (both were written together when the report
+ * posted), so dropping it and treating the snapshot as "current" reproduces
+ * exactly what was computed then.
+ */
+async function handleKillTallyComponent(interaction) {
+  const customId = interaction.customId ?? '';
+  const key = customId.slice(KILL_TALLY_BUTTON_PREFIX.length);
+  const snapshot = loadSnapshot(key);
+
+  if (!snapshot) {
+    await interaction.reply({
+      content:
+        '❌ There is no stored roster for that guild any more. The next report will record one.',
+      flags: MessageFlags.Ephemeral
+    });
+    return true;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const history = loadKillHistory(key);
+  const priorEntries = history.slice(0, -1);
+  const tally = buildKillTally(priorEntries, snapshot.members, snapshot.capturedAt);
+
+  if (tally.length === 0) {
+    await interaction.editReply('❌ No member has recorded honorable kills yet.');
+    return true;
+  }
+
+  const messages = buildKillTallyMessages({ guild: snapshot.guild, tally, owners: buildOwnerIndex() });
+
+  try {
+    for (const embeds of messages) await interaction.user.send({ embeds });
+
+    await interaction.editReply(
+      `📬 Sent you the kill tally by DM${messages.length > 1 ? ` — ${messages.length} messages` : ''}.`
+    );
+  } catch {
+    const [first, ...rest] = messages;
+
+    await interaction.editReply({
+      content: '⚠️ I could not DM you, so here it is instead.',
+      embeds: first ?? []
+    });
+
+    for (const embeds of rest) {
+      await interaction.followUp({ embeds, flags: MessageFlags.Ephemeral });
+    }
+  }
+
+  return true;
+}
+
+/**
  * Handles the roster button.
  *
  * @returns {Promise<boolean>} whether this module handled the interaction.
  */
 async function handleComponent(interaction) {
   const customId = interaction.customId ?? '';
+
+  if (interaction.isButton?.() && customId.startsWith(KILL_TALLY_BUTTON_PREFIX)) {
+    return handleKillTallyComponent(interaction);
+  }
 
   if (!interaction.isButton?.() || !customId.startsWith(ROSTER_BUTTON_PREFIX)) return false;
 
@@ -275,11 +390,14 @@ module.exports = {
   blockSection,
   buildBreakdownMessages,
   buildFields,
+  buildKillTallyMessages,
   buildSummary,
   columnSection,
   countOf,
   groupByOwner,
   handleComponent,
+  handleKillTallyComponent,
+  killTallyLine,
   personLines,
   unclaimedLines
 };

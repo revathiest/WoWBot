@@ -15,8 +15,10 @@ const { loadConfig, saveConfig, channelFor, guildKey } = require('./config');
 const { collectSnapshot } = require('./collect');
 const { diffSnapshots } = require('./diff');
 const { loadSnapshot, saveSnapshot } = require('./history');
+const { appendKillEntry, loadKillHistory } = require('./killHistory');
+const { buildKillTally } = require('./killTally');
 const { buildOwnerIndex } = require('./links');
-const { buildReportEmbed, buildRosterComponents } = require('./render');
+const { buildKillTallyComponents, buildReportEmbed, buildRosterComponents } = require('./render');
 const { fetchPresentUserIds } = require('./membership');
 const { isGuildInScope } = require('../guildScope');
 const { record } = require('../audit/log');
@@ -91,11 +93,32 @@ async function buildGuildReport(
 
   const previous = loadSnapshot(key);
   const diff = diffSnapshots(previous, snapshot);
-  const embed = buildReportEmbed({ diff, owners: buildOwnerIndex(), warnings, presentUserIds });
 
-  if (persist) saveSnapshot(key, snapshot);
+  // Independent of `diff`: the kill tally runs once a day regardless of
+  // whether this guild's own report frequency is daily or weekly.
+  const killTally = buildKillTally(loadKillHistory(key), snapshot.members, now);
+  const embed = buildReportEmbed({
+    diff,
+    owners: buildOwnerIndex(),
+    warnings,
+    presentUserIds,
+    killTally
+  });
 
-  return { key, guild, diff, embed, warnings, persisted: persist };
+  if (persist) {
+    saveSnapshot(key, snapshot);
+
+    appendKillEntry(key, {
+      capturedAt: now,
+      kills: Object.fromEntries(
+        Object.entries(snapshot.members)
+          .filter(([, member]) => Number.isFinite(member.kills))
+          .map(([memberKey, member]) => [memberKey, member.kills])
+      )
+    });
+  }
+
+  return { key, guild, diff, embed, warnings, killTally, persisted: persist };
 }
 
 /**
@@ -196,13 +219,13 @@ async function publishReports(client, reports, { config = loadConfig(), guildId 
 
       if (config.clearChannel) await clearOwnMessages(channel, client);
 
+      const guildRefs = entries.map(entry => ({ key: entry.key, name: entry.guild.name }));
+
       // Discord accepts up to ten embeds per message, which is above the
       // tracked-guild ceiling, so one message per channel always fits.
       await channel.send({
         embeds: entries.map(entry => entry.embed),
-        components: buildRosterComponents(
-          entries.map(entry => ({ key: entry.key, name: entry.guild.name }))
-        )
+        components: [...buildRosterComponents(guildRefs), ...buildKillTallyComponents(guildRefs)]
       });
 
       delivered.push(channelId);

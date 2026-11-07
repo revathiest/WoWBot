@@ -108,7 +108,20 @@ function killLines(entries, owners) {
   );
 }
 
+/**
+ * Top gainers from today's kill tally, for the headline embed. The full
+ * lifetime/7-day/today figures for everyone are a button press away — this
+ * is only the "something happened today" teaser.
+ */
+function killTallySummaryLines(tally, owners = new Map(), { max = 5 } = {}) {
+  return tally
+    .filter(entry => Number.isFinite(entry.today) && entry.today > 0)
+    .slice(0, max)
+    .map(entry => `${nameOf(entry, owners)} — **+${formatNumber(entry.today)}**`);
+}
+
 const ROSTER_BUTTON_PREFIX = 'report:roster:';
+const KILL_TALLY_BUTTON_PREFIX = 'report:kills:';
 
 /**
  * A button per guild, sending the full Discord breakdown by DM.
@@ -139,6 +152,35 @@ function buildRosterComponents(guilds) {
   return rows;
 }
 
+/**
+ * A second button per guild, DMing the full honorable-kill tally: lifetime,
+ * the last 7 days, and today, for every member with kill data. Kept separate
+ * from the roster button rather than folded into one, because Discord allows
+ * five buttons per row and up to ten tracked guilds already need two rows for
+ * the roster alone.
+ */
+function buildKillTallyComponents(guilds) {
+  const rows = [];
+
+  for (let index = 0; index < guilds.length; index += 5) {
+    const row = new ActionRowBuilder().addComponents(
+      guilds.slice(index, index + 5).map(guild =>
+        new ButtonBuilder()
+          .setCustomId(`${KILL_TALLY_BUTTON_PREFIX}${guild.key}`)
+          .setLabel(
+            guilds.length === 1 ? 'Kill tally' : `${guild.name}: kill tally`.slice(0, 80)
+          )
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('💀')
+      )
+    );
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
 /** The period the report covers, or an explanation of why there is no period. */
 function describePeriod(diff) {
   if (diff.isFirstRun) {
@@ -158,8 +200,16 @@ function describePeriod(diff) {
  * @param {object} diff     From diffSnapshots.
  * @param {Map}    owners   Character key -> Discord user id, from buildOwnerIndex.
  * @param {string[]} warnings  Anything the collector could not fetch.
+ * @param {object[]} killTally  From buildKillTally — today's/7-day/lifetime
+ *   honorable kills per member, independent of the report's own frequency.
  */
-function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUserIds = null }) {
+function buildReportEmbed({
+  diff,
+  owners = new Map(),
+  warnings = [],
+  presentUserIds = null,
+  killTally = []
+}) {
   const embed = new EmbedBuilder()
     .setColor(factionColor(diff.guild?.faction))
     .setTitle(`Weekly Report — ${guildLabel(diff.guild)}`)
@@ -203,11 +253,17 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUser
   addList(embed, `⬆️ Level-ups (${diff.levelUps.length})`, levelLines(diff.levelUps, owners));
   addList(embed, `🎖️ Promotions (${diff.promotions.length})`, rankLines(diff.promotions, owners));
   addList(embed, '💀 Honorable Kills', killLines(diff.kills, owners));
+  addList(embed, '📅 Most Kills Today', killTallySummaryLines(killTally, owners));
 
   // A quiet week is a real result, and saying so beats an embed of bare totals
   // that looks like something failed.
   const hasContent =
-    diff.joined.length + diff.left.length + diff.levelUps.length + diff.promotions.length + diff.kills.length >
+    diff.joined.length +
+      diff.left.length +
+      diff.levelUps.length +
+      diff.promotions.length +
+      diff.kills.length +
+      killTallySummaryLines(killTally, owners).length >
     0;
 
   if (!hasContent && !diff.isFirstRun) {
@@ -230,9 +286,11 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUser
 }
 
 module.exports = {
+  KILL_TALLY_BUTTON_PREFIX,
   ROSTER_BUTTON_PREFIX,
   MAX_FIELD_LENGTH,
   MAX_LISTED,
+  buildKillTallyComponents,
   buildReportEmbed,
   buildRosterComponents,
   countOf,
@@ -240,6 +298,7 @@ module.exports = {
   formatChange,
   guildLabel,
   killLines,
+  killTallySummaryLines,
   levelLines,
   listField,
   membershipLines,

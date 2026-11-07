@@ -1,13 +1,15 @@
 jest.mock('../../utils/blizzard/profile', () => ({
   getCharacterProfile: jest.fn(),
   getCharacterMedia: jest.fn(),
-  getCharacterEquipment: jest.fn()
+  getCharacterEquipment: jest.fn(),
+  getCharacterPvpSummary: jest.fn()
 }));
 
 const {
   getCharacterProfile,
   getCharacterMedia,
-  getCharacterEquipment
+  getCharacterEquipment,
+  getCharacterPvpSummary
 } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/character');
@@ -58,6 +60,7 @@ beforeEach(() => {
   getCharacterProfile.mockResolvedValue(PROFILE);
   getCharacterMedia.mockResolvedValue(MEDIA);
   getCharacterEquipment.mockResolvedValue(EQUIPMENT);
+  getCharacterPvpSummary.mockResolvedValue({ honorable_kills: 1337, pvp_rank: 6 });
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -90,6 +93,7 @@ describe('/character execute', () => {
     expect(field(embed, 'Class').value).toBe('Paladin');
     expect(field(embed, 'Item Level').value).toBe('8 equipped / 8 avg');
     expect(field(embed, 'Achievements').value).toBe('0');
+    expect(field(embed, 'Honorable Kills').value).toBe('1,337');
     expect(field(embed, 'Guild').value).toBe('<Circle of Lore>');
     expect(field(embed, 'Last Login').value).toBe('<t:1700000000:R>');
     expect(embed.thumbnail.url).toBe('https://render/avatar.jpg');
@@ -180,6 +184,26 @@ describe('/character execute', () => {
     const embed = replyEmbed(target);
     expect(embed.title).toContain('Judgement Judy');
     expect(embed.thumbnail).toBeUndefined();
+  });
+
+  it('omits honorable kills, without warning, when the PvP summary 404s', async () => {
+    getCharacterPvpSummary.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
+    const target = interaction();
+
+    await command.execute(target);
+
+    expect(field(replyEmbed(target), 'Honorable Kills')).toBeUndefined();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('still replies and warns when the PvP summary fails for another reason', async () => {
+    getCharacterPvpSummary.mockRejectedValue(new Error('rate limited'));
+    const target = interaction();
+
+    await command.execute(target);
+
+    expect(field(replyEmbed(target), 'Honorable Kills')).toBeUndefined();
+    expect(console.warn).toHaveBeenCalled();
   });
 
   it('asks for a surname instead of a bare name', async () => {

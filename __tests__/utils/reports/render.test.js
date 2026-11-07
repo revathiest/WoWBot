@@ -4,11 +4,13 @@ const { buildSnapshot, diffSnapshots } = require('../../../utils/reports/diff');
 const { characterKey } = require('../../../utils/reports/links');
 const {
   MAX_FIELD_LENGTH,
+  buildKillTallyComponents,
   buildReportEmbed,
   describePeriod,
   formatChange,
   guildLabel,
   killLines,
+  killTallySummaryLines,
   levelLines,
   listField,
   membershipLines,
@@ -118,6 +120,58 @@ describe('line builders', () => {
   });
 });
 
+describe('killTallySummaryLines', () => {
+  it('only shows members who gained kills today', () => {
+    const lines = killTallySummaryLines([
+      { name: 'Gainer', surname: 'One', today: 12, last7: 40, lifetime: 500 },
+      { name: 'Quiet', surname: 'Two', today: 0, last7: 10, lifetime: 100 },
+      { name: 'Unknown', surname: 'Three', today: null, last7: null, lifetime: 50 }
+    ]);
+
+    expect(lines).toEqual(['**Gainer One** — **+12**']);
+  });
+
+  it('adds a mention for a linked character', () => {
+    const lines = killTallySummaryLines(
+      [{ name: 'Judgement', surname: 'Judy', today: 12, last7: 40, lifetime: 500 }],
+      OWNERS
+    );
+
+    expect(lines[0]).toContain('<@99>');
+  });
+
+  it('caps the list', () => {
+    const tally = Array.from({ length: 10 }, (_, i) => ({
+      name: `C${i}`,
+      surname: 'Smith',
+      today: 10 - i,
+      last7: 0,
+      lifetime: 0
+    }));
+
+    expect(killTallySummaryLines(tally, new Map(), { max: 3 })).toHaveLength(3);
+  });
+});
+
+describe('buildKillTallyComponents', () => {
+  it('builds one button per guild', () => {
+    const rows = buildKillTallyComponents([{ key: 'a', name: 'Apex' }, { key: 'b', name: 'Second' }]);
+    const buttons = rows.flatMap(row => row.components);
+
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0].data.custom_id).toBe('report:kills:a');
+  });
+
+  it('splits into rows of five', () => {
+    const guilds = Array.from({ length: 7 }, (_, i) => ({ key: `g${i}`, name: `Guild ${i}` }));
+    const rows = buildKillTallyComponents(guilds);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].components).toHaveLength(5);
+    expect(rows[1].components).toHaveLength(2);
+  });
+});
+
 describe('guildLabel', () => {
   it('is just the guild name — there is no realm', () => {
     expect(guildLabel(GUILD)).toBe('Circle of Lore');
@@ -178,6 +232,16 @@ describe('buildReportEmbed', () => {
   it('says so plainly when nothing happened', () => {
     const embed = buildReportEmbed({ diff: diffSnapshots(snapshot([]), snapshot([])) });
     expect(field(embed, 'Quiet week')).toBeDefined();
+  });
+
+  it('is not a quiet week when only the kill tally has news', () => {
+    const embed = buildReportEmbed({
+      diff: diffSnapshots(snapshot([]), snapshot([])),
+      killTally: [{ name: 'Gainer', surname: 'One', today: 5, last7: 5, lifetime: 5 }]
+    });
+
+    expect(field(embed, 'Quiet week')).toBeUndefined();
+    expect(field(embed, '📅 Most Kills Today').value).toContain('Gainer');
   });
 
   it('does not call a first report a quiet week', () => {

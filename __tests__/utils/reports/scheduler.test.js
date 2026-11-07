@@ -1,5 +1,6 @@
 jest.mock('../../../utils/reports/collect');
 jest.mock('../../../utils/reports/history');
+jest.mock('../../../utils/reports/killHistory');
 jest.mock('../../../utils/reports/config', () => ({
   ...jest.requireActual('../../../utils/reports/config'),
   loadConfig: jest.fn(),
@@ -8,6 +9,7 @@ jest.mock('../../../utils/reports/config', () => ({
 
 const { collectSnapshot } = require('../../../utils/reports/collect');
 const { loadSnapshot, saveSnapshot } = require('../../../utils/reports/history');
+const { appendKillEntry, loadKillHistory } = require('../../../utils/reports/killHistory');
 const { loadConfig, saveConfig, DEFAULTS } = require('../../../utils/reports/config');
 const { buildSnapshot } = require('../../../utils/reports/diff');
 
@@ -67,6 +69,7 @@ beforeEach(() => {
   saveConfig.mockImplementation(changes => ({ ...config(), ...changes }));
   collectSnapshot.mockResolvedValue({ snapshot: snapshotOf(), warnings: [] });
   loadSnapshot.mockReturnValue(null);
+  loadKillHistory.mockReturnValue([]);
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -206,6 +209,53 @@ describe('buildGuildReport', () => {
   it('reports a first run when there is no history', async () => {
     expect((await buildGuildReport(APEX)).diff.isFirstRun).toBe(true);
   });
+
+  it('does not append kill history when previewing', async () => {
+    await buildGuildReport(APEX, { persist: false });
+    expect(appendKillEntry).not.toHaveBeenCalled();
+  });
+
+  it('appends today\'s kill totals when posting for real', async () => {
+    collectSnapshot.mockResolvedValue({
+      snapshot: snapshotOf([{ name: 'Butud', level: 70, kills: 500 }]),
+      warnings: []
+    });
+
+    await buildGuildReport(APEX, { persist: true, now: MONDAY_18_UTC });
+
+    expect(appendKillEntry).toHaveBeenCalledWith(
+      expect.any(String),
+      { capturedAt: MONDAY_18_UTC, kills: { butud: 500 } }
+    );
+  });
+
+  it('omits members with no kill data from the appended entry', async () => {
+    collectSnapshot.mockResolvedValue({
+      snapshot: snapshotOf([{ name: 'NoKills', level: 1, kills: null }]),
+      warnings: []
+    });
+
+    await buildGuildReport(APEX, { persist: true, now: MONDAY_18_UTC });
+
+    expect(appendKillEntry).toHaveBeenCalledWith(expect.any(String), {
+      capturedAt: MONDAY_18_UTC,
+      kills: {}
+    });
+  });
+
+  it('builds a kill tally independent of this guild\'s report frequency', async () => {
+    loadKillHistory.mockReturnValue([{ capturedAt: MONDAY_18_UTC - DAY_MS, kills: { butud: 60 } }]);
+    collectSnapshot.mockResolvedValue({
+      snapshot: snapshotOf([{ name: 'Butud', level: 70, kills: 70 }]),
+      warnings: []
+    });
+
+    const { killTally } = await buildGuildReport(APEX, { now: MONDAY_18_UTC });
+
+    expect(killTally).toEqual([
+      expect.objectContaining({ name: 'Butud', today: 10, lifetime: 70 })
+    ]);
+  });
 });
 
 describe('buildAllReports', () => {
@@ -241,6 +291,19 @@ describe('publishReports', () => {
 
     expect(client.send).toHaveBeenCalledTimes(1);
     expect(client.send.mock.calls[0][0].embeds).toHaveLength(2);
+  });
+
+  it('attaches both a roster button and a kill-tally button per guild', async () => {
+    const client = fakeClient();
+    const { reports } = await buildAllReports({ config: config() });
+
+    await publishReports(client, reports, { config: config(), guildId: null });
+
+    const components = client.send.mock.calls[0][0].components;
+    const customIds = components.flatMap(row => row.components.map(c => c.data.custom_id));
+
+    expect(customIds.some(id => id.startsWith('report:roster:'))).toBe(true);
+    expect(customIds.some(id => id.startsWith('report:kills:'))).toBe(true);
   });
 
   it('routes a guild with an override to its own channel', async () => {
@@ -311,6 +374,11 @@ describe('runScheduledReports', () => {
   it('persists snapshots, so next week has a baseline', async () => {
     await runScheduledReports(fakeClient(), { now: MONDAY_18_UTC, config: config() });
     expect(saveSnapshot).toHaveBeenCalled();
+  });
+
+  it('appends the daily kill history, even on a weekly-frequency guild', async () => {
+    await runScheduledReports(fakeClient(), { now: MONDAY_18_UTC, config: weekly() });
+    expect(appendKillEntry).toHaveBeenCalled();
   });
 });
 

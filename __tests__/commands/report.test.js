@@ -7,6 +7,7 @@ jest.mock('../../utils/reports/config', () => ({
 }));
 jest.mock('../../utils/reports/scheduler');
 jest.mock('../../utils/reports/history');
+jest.mock('../../utils/reports/killHistory');
 
 const { PermissionFlagsBits } = require('discord.js');
 
@@ -20,6 +21,7 @@ const {
 } = require('../../utils/reports/config');
 const { buildAllReports, publishReports, nextSlotAt } = require('../../utils/reports/scheduler');
 const { deleteSnapshot, loadSnapshot } = require('../../utils/reports/history');
+const { deleteKillHistory } = require('../../utils/reports/killHistory');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/report');
 const { createInteraction } = require('../helpers/interaction');
@@ -200,6 +202,7 @@ describe('/report untrack', () => {
     await command.execute(fake);
 
     expect(deleteSnapshot).toHaveBeenCalled();
+    expect(deleteKillHistory).toHaveBeenCalled();
     expect(said(fake)).toContain('No longer reporting');
   });
 

@@ -29,6 +29,7 @@ const {
 } = require('../../utils/reports/config');
 const { buildAllReports, nextSlotAt, publishReports } = require('../../utils/reports/scheduler');
 const { deleteSnapshot, loadSnapshot } = require('../../utils/reports/history');
+const { deleteKillHistory } = require('../../utils/reports/killHistory');
 const { addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const { discordTimestamp, FALLBACK_COLOR, REGION_CHOICES } = require('../../utils/wow');
@@ -353,7 +354,10 @@ function untrack(interaction) {
 
   // Drop the stored history too, so re-tracking later starts clean rather than
   // diffing against a roster that may be months old.
-  removedGuilds.forEach(guild => deleteSnapshot(guildKey(guild)));
+  removedGuilds.forEach(guild => {
+    deleteSnapshot(guildKey(guild));
+    deleteKillHistory(guildKey(guild));
+  });
 
   return `✅ No longer reporting on **${name}**, and its stored history was discarded.`;
 }

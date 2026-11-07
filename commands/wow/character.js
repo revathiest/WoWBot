@@ -5,7 +5,8 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const {
   getCharacterProfile,
   getCharacterMedia,
-  getCharacterEquipment
+  getCharacterEquipment,
+  getCharacterPvpSummary
 } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const {
@@ -90,7 +91,7 @@ function equipmentFields(equipment) {
   }));
 }
 
-function buildEmbed({ profile, media, equipment, scopeLabel }) {
+function buildEmbed({ profile, media, equipment, pvp, scopeLabel }) {
   const specName = profile.active_spec?.name;
   const className = profile.character_class?.name;
   const specAndClass = [specName, className].filter(Boolean).join(' ') || 'Unknown';
@@ -122,6 +123,17 @@ function buildEmbed({ profile, media, equipment, scopeLabel }) {
 
   if (profile.guild?.name) {
     embed.addFields({ name: 'Guild', value: `<${profile.guild.name}>`, inline: true });
+  }
+
+  // Forever has no arena — this is the vanilla honour system, so pvp_rank is a
+  // tier rather than a ladder position. A missing summary (below level 10, or
+  // never logged out) just means the field is omitted, not an error.
+  if (Number.isFinite(pvp?.honorable_kills)) {
+    embed.addFields({
+      name: 'Honorable Kills',
+      value: formatNumber(pvp.honorable_kills),
+      inline: true
+    });
   }
 
   if (profile.active_title?.display_string) {
@@ -178,8 +190,8 @@ async function execute(interaction) {
     throw err;
   }
 
-  // Artwork and gear are extras; neither failing should sink the whole reply.
-  const [media, equipment] = await Promise.all([
+  // Artwork, gear, and PvP are extras; neither failing should sink the whole reply.
+  const [media, equipment, pvp] = await Promise.all([
     getCharacterMedia(characterName, { region: scope.region }).catch(err => {
       console.warn(`Could not load media for ${characterName}: ${err.message}`);
       return null;
@@ -187,17 +199,25 @@ async function execute(interaction) {
     getCharacterEquipment(characterName, { region: scope.region }).catch(err => {
       console.warn(`Could not load equipment for ${characterName}: ${err.message}`);
       return null;
+    }),
+    getCharacterPvpSummary(characterName, { region: scope.region }).catch(err => {
+      // A 404 here is normal — see the note in utils/blizzard/profile.js — and
+      // not worth a warning on every character below level 10.
+      if (!(err instanceof BlizzardApiError) || !err.isNotFound) {
+        console.warn(`Could not load the PvP summary for ${characterName}: ${err.message}`);
+      }
+      return null;
     })
   ]);
 
   await interaction.editReply({
-    embeds: [buildEmbed({ profile, media, equipment, scopeLabel: scope.label })]
+    embeds: [buildEmbed({ profile, media, equipment, pvp, scopeLabel: scope.label })]
   });
 }
 
 module.exports = {
   data,
-  help: 'Shows level, class, ruleset, guild, item level, and achievement points for a character.',
+  help: 'Shows level, class, ruleset, guild, item level, achievement points, and honorable kills for a character.',
   category: 'WoW',
   buildEmbed,
   equipmentFields,

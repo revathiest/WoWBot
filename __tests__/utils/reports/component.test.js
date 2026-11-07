@@ -1,4 +1,5 @@
 jest.mock('../../../utils/reports/history');
+jest.mock('../../../utils/reports/killHistory');
 jest.mock('../../../utils/reports/links', () => ({
   ...jest.requireActual('../../../utils/reports/links'),
   buildOwnerIndex: jest.fn(),
@@ -6,15 +7,18 @@ jest.mock('../../../utils/reports/links', () => ({
 }));
 
 const { loadSnapshot } = require('../../../utils/reports/history');
+const { loadKillHistory } = require('../../../utils/reports/killHistory');
 const { buildOwnerIndex, characterKey, mainFor } = require('../../../utils/reports/links');
-const { ROSTER_BUTTON_PREFIX } = require('../../../utils/reports/render');
+const { KILL_TALLY_BUTTON_PREFIX, ROSTER_BUTTON_PREFIX } = require('../../../utils/reports/render');
 const { embedLength } = require('../../../utils/embeds');
 const {
   COLUMN_LINES,
   buildBreakdownMessages,
+  buildKillTallyMessages,
   buildSummary,
   groupByOwner,
   handleComponent,
+  killTallyLine,
   personLines,
   unclaimedLines
 } = require('../../../utils/reports/component');
@@ -88,6 +92,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   loadSnapshot.mockReturnValue(snapshot());
+  loadKillHistory.mockReturnValue([]);
   buildOwnerIndex.mockReturnValue(
     new Map([[characterKey({ name: 'Butud', realm: 'nightslayer' }), 'u1']])
   );
@@ -450,5 +455,124 @@ describe('handleComponent', () => {
 
     expect(await handleComponent(fake)).toBe(true);
     expect(fake.user.send).toHaveBeenCalled();
+  });
+});
+
+describe('killTallyLine', () => {
+  it('shows lifetime, 7-day, and today figures together', () => {
+    const line = killTallyLine(
+      { name: 'Judgement', surname: 'Judy', today: 12, last7: 40, lifetime: 500 },
+      new Map()
+    );
+
+    expect(line).toBe('**Judgement Judy** — today **+12** · 7d **+40** · lifetime **500**');
+  });
+
+  it('shows a dash for an unknown figure rather than a false zero', () => {
+    const line = killTallyLine(
+      { name: 'Judgement', surname: 'Judy', today: null, last7: null, lifetime: 500 },
+      new Map()
+    );
+
+    expect(line).toContain('today **—**');
+    expect(line).toContain('7d **—**');
+  });
+});
+
+describe('buildKillTallyMessages', () => {
+  it('lists every member with all three figures', () => {
+    const messages = buildKillTallyMessages({
+      guild: { name: 'Apex' },
+      tally: [{ name: 'Judgement', surname: 'Judy', today: 12, last7: 40, lifetime: 500 }]
+    });
+
+    expect(allLines(messages)).toContain(
+      '**Judgement Judy** — today **+12** · 7d **+40** · lifetime **500**'
+    );
+  });
+
+  it('spills across messages rather than truncating, for a large guild', () => {
+    const tally = Array.from({ length: 400 }, (_, i) => ({
+      name: `Char${i}`,
+      surname: 'Smith',
+      today: 1,
+      last7: 1,
+      lifetime: 1
+    }));
+
+    const messages = buildKillTallyMessages({ guild: { name: 'Apex' }, tally });
+
+    expect(messages.length).toBeGreaterThan(1);
+    expect(allLines(messages).filter(line => line.includes('Char'))).toHaveLength(400);
+  });
+});
+
+describe('handleComponent — kill tally', () => {
+  function killSnapshot() {
+    return {
+      guild: { name: 'Apex' },
+      capturedAt: 2000,
+      members: {
+        judgement: { name: 'Judgement', surname: 'Judy', className: 'Paladin', kills: 500 },
+        stranger: { name: 'Stranger', surname: 'Smith', className: 'Rogue', kills: 50 }
+      }
+    };
+  }
+
+  function killInteraction(overrides = {}) {
+    return interaction({ customId: `${KILL_TALLY_BUTTON_PREFIX}${KEY}`, ...overrides });
+  }
+
+  beforeEach(() => {
+    loadSnapshot.mockReturnValue(killSnapshot());
+    loadKillHistory.mockReturnValue([
+      { capturedAt: 1000, kills: { judgement: 480, stranger: 50 } },
+      // Today's entry, already appended by the time the button can be pressed.
+      { capturedAt: 2000, kills: { judgement: 500, stranger: 50 } }
+    ]);
+  });
+
+  it('DMs the tally to whoever pressed the button', async () => {
+    const fake = killInteraction();
+
+    expect(await handleComponent(fake)).toBe(true);
+    expect(fake.user.send).toHaveBeenCalled();
+    expect(said(fake)).toContain('kill tally');
+  });
+
+  it("computes today's gain by dropping the already-appended latest entry", async () => {
+    const fake = killInteraction();
+    await handleComponent(fake);
+
+    const lines = allLines(fake.user.send.mock.calls.map(call => call[0].embeds));
+    expect(lines.some(line => line.includes('Judgement Judy') && line.includes('+20'))).toBe(true);
+  });
+
+  it('says so when there is no stored roster yet', async () => {
+    loadSnapshot.mockReturnValue(null);
+    const fake = killInteraction();
+
+    expect(await handleComponent(fake)).toBe(true);
+    expect(said(fake)).toContain('no stored roster');
+    expect(fake.user.send).not.toHaveBeenCalled();
+  });
+
+  it('says so when nobody has recorded kills yet', async () => {
+    loadSnapshot.mockReturnValue({ guild: { name: 'Apex' }, capturedAt: 2000, members: {} });
+    loadKillHistory.mockReturnValue([]);
+    const fake = killInteraction();
+
+    await handleComponent(fake);
+    expect(said(fake)).toContain('No member');
+    expect(fake.user.send).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the reply when DMs are closed', async () => {
+    const fake = killInteraction({ dmFails: true });
+    await handleComponent(fake);
+
+    expect(fake.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ embeds: expect.any(Array) })
+    );
   });
 });

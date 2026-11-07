@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { normalizeGame, normalizeRegion, readConfig } = require('../../config');
+const { normalizeRegion, readConfig } = require('../../config');
 const { realmMatchKey } = require('../wow');
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
@@ -66,31 +66,25 @@ function normalizeTimestamp(value) {
 
 /**
  * A stable identity for a tracked guild, used to key its snapshot file and to
- * reject duplicates. Realm and guild names are folded the same forgiving way
- * realm input is, so "Apex" and "apex " are one entry rather than two.
+ * reject duplicates. Region and name are folded the same forgiving way a
+ * character name is, so "Apex" and "apex " are one entry rather than two.
+ *
+ * Guilds have no realm, so name plus region is the whole identity.
  */
-function guildKey({ name, realm, region, game }) {
-  return [
-    normalizeRegion(region) ?? 'us',
-    normalizeGame(game) ?? 'retail',
-    realmMatchKey(realm),
-    realmMatchKey(name)
-  ].join(':');
+function guildKey({ name, region }) {
+  return [normalizeRegion(region) ?? 'us', realmMatchKey(name)].join(':');
 }
 
 /** One tracked WoW guild. Returns null when it is too malformed to keep. */
 function normalizeGuild(raw, config = readConfig()) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const name = String(source.name ?? '').trim();
-  const realm = String(source.realm ?? '').trim() || config.blizzard.realm;
 
-  if (!name || !realm) return null;
+  if (!name) return null;
 
   return {
     name,
-    realm,
     region: normalizeRegion(source.region) ?? config.blizzard.region,
-    game: normalizeGame(source.game) ?? config.blizzard.game,
     // Optional per-guild override; falls back to the server-wide channel.
     channelId: normalizeId(source.channelId)
   };
@@ -200,20 +194,20 @@ function trackGuild(raw) {
 }
 
 /**
- * Removes a guild by name, optionally narrowed by realm.
+ * Removes a guild by name, optionally narrowed by region (for the rare case of
+ * two same-named guilds in different regions).
  *
  * The removed entries come back so the caller can delete their snapshots — an
  * untracked guild should not leave a week of history behind for a later
  * re-track to diff against.
  */
-function untrackGuild({ name, realm = null }) {
+function untrackGuild({ name, region = null }) {
   const current = loadConfig();
   const nameKey = realmMatchKey(name);
-  const realmKey = realm ? realmMatchKey(realm) : null;
+  const regionKey = region ? normalizeRegion(region) : null;
 
   const matches = guild =>
-    realmMatchKey(guild.name) === nameKey &&
-    (realmKey === null || realmMatchKey(guild.realm) === realmKey);
+    realmMatchKey(guild.name) === nameKey && (regionKey === null || guild.region === regionKey);
 
   const removed = current.guilds.filter(matches);
 

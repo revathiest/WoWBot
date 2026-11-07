@@ -5,24 +5,19 @@
 // argument, which is what makes it testable with plain object literals — the
 // same reason utils/spam/detector.js stays free of Discord types.
 //
-// The Blizzard API reports only CURRENT state — a season's total wins, a
-// character's lifetime honorable kills, today's roster. None of it is per-week.
-// So "gained 180 rating" and "killed 400 players this week" exist only because
-// the previous week's snapshot was kept to subtract from. That is the entire
-// reason this feature stores anything at all.
-
-const { BRACKETS } = require('../blizzard/pvp');
+// The Blizzard API reports only CURRENT state — a character's lifetime
+// honorable kills, today's roster. None of it is per-week. So "killed 400
+// players this week" exists only because the previous week's snapshot was
+// kept to subtract from. That is the entire reason this feature stores
+// anything at all.
 
 /**
- * Roster entries are matched between weeks by name, which is stable per realm.
- *
- * Realmless flavours (Classic Forever) need the surname too: a roster there can
+ * Roster entries are matched between weeks by name AND surname: a roster can
  * hold two characters with the same first name, and without the surname they
- * would collapse into one entry and their kills and ranks would be attributed
- * to whichever was read last. Omitting the surname produces the original
- * name-only key, so snapshots written before this existed still match.
+ * would collapse into one entry, with kills attributed to whichever was read
+ * last.
  */
-function memberKey(name, surname = null) {
+function memberKey(name, surname) {
   const first = String(name ?? '').trim().toLowerCase();
   const last = String(surname ?? '').trim().toLowerCase();
 
@@ -45,13 +40,11 @@ function buildSnapshot({ guild, capturedAt, members = [] }) {
 
     entries[key] = {
       name: member.name,
-      // Null for every flavour but Classic Forever, where it is half the name.
       surname: member.surname ?? null,
       level: Number.isFinite(member.level) ? member.level : null,
       className: member.className ?? null,
       rank: Number.isFinite(member.rank) ? member.rank : null,
-      kills: Number.isFinite(member.kills) ? member.kills : null,
-      brackets: member.brackets ?? {}
+      kills: Number.isFinite(member.kills) ? member.kills : null
     };
   }
 
@@ -74,7 +67,12 @@ function deriveMaxLevel(snapshot) {
 }
 
 function summarize(member) {
-  return { name: member.name, level: member.level, className: member.className };
+  return {
+    name: member.name,
+    surname: member.surname ?? null,
+    level: member.level,
+    className: member.className
+  };
 }
 
 /** Rank 0 is the guild master, so a SMALLER number is a more senior rank. */
@@ -131,50 +129,6 @@ function membershipChanges(previous, current) {
 }
 
 /**
- * Per-bracket arena standing for guild members, best rating first.
- *
- * A member absent from last week's ladder is `isNew` rather than a huge gain —
- * reporting "+2100 rating" for someone who simply played their first rated game
- * would be nonsense.
- */
-function arenaChanges(previous, current, brackets = BRACKETS) {
-  return brackets
-    .map(bracket => {
-      const entries = [];
-
-      for (const [key, member] of Object.entries(current.members)) {
-        const standing = member.brackets?.[bracket];
-        if (!standing || !Number.isFinite(standing.rating)) continue;
-
-        const before = previous.members[key]?.brackets?.[bracket] ?? null;
-        const hadRating = Boolean(before) && Number.isFinite(before.rating);
-
-        entries.push({
-          name: member.name,
-          className: member.className,
-          rating: standing.rating,
-          rank: Number.isFinite(standing.rank) ? standing.rank : null,
-          won: standing.won ?? 0,
-          lost: standing.lost ?? 0,
-          isNew: !hadRating,
-          ratingChange: hadRating ? standing.rating - before.rating : null,
-          // A falling rank NUMBER is an improvement, so invert it: positive
-          // means "climbed the ladder", matching the rating delta's direction.
-          rankChange:
-            hadRating && Number.isFinite(before.rank) && Number.isFinite(standing.rank)
-              ? before.rank - standing.rank
-              : null,
-          wonChange: hadRating ? (standing.won ?? 0) - (before.won ?? 0) : null,
-          lostChange: hadRating ? (standing.lost ?? 0) - (before.lost ?? 0) : null
-        });
-      }
-
-      return { bracket, entries: entries.sort((a, b) => b.rating - a.rating) };
-    })
-    .filter(bracket => bracket.entries.length > 0);
-}
-
-/**
  * Honorable kills gained since the last snapshot.
  *
  * Lifetime totals only go up, so a negative delta means the character was
@@ -193,7 +147,13 @@ function killChanges(previous, current) {
     const change = member.kills - before.kills;
     if (change <= 0) continue;
 
-    gains.push({ name: member.name, className: member.className, total: member.kills, change });
+    gains.push({
+      name: member.name,
+      surname: member.surname ?? null,
+      className: member.className,
+      total: member.kills,
+      change
+    });
   }
 
   return gains.sort((a, b) => b.change - a.change);
@@ -205,7 +165,6 @@ function totals(snapshot, maxLevel) {
   return {
     members: members.length,
     atMaxLevel: maxLevel === null ? 0 : members.filter(member => member.level === maxLevel).length,
-    ranked: members.filter(member => Object.keys(member.brackets ?? {}).length > 0).length,
     kills: members.reduce((sum, member) => sum + (member.kills ?? 0), 0)
   };
 }
@@ -215,7 +174,7 @@ function totals(snapshot, maxLevel) {
  * is nothing to subtract from, so only current standings are produced and
  * `isFirstRun` tells the renderer to say so rather than imply a quiet week.
  */
-function diffSnapshots(previous, current, { brackets = BRACKETS } = {}) {
+function diffSnapshots(previous, current) {
   const maxLevel = deriveMaxLevel(current);
   const base = previous ?? { members: {}, capturedAt: null };
 
@@ -240,13 +199,11 @@ function diffSnapshots(previous, current, { brackets = BRACKETS } = {}) {
     levelUps: levelChanges(base, current, maxLevel),
     promotions,
     demotions,
-    arena: arenaChanges(base, current, brackets),
     kills: killChanges(base, current)
   };
 }
 
 module.exports = {
-  arenaChanges,
   buildSnapshot,
   deriveMaxLevel,
   diffSnapshots,

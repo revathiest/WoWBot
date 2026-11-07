@@ -49,12 +49,12 @@ describe('/item by id', () => {
 
     await command.execute(target);
 
-    expect(getItem).toHaveBeenCalledWith('19019', { region: 'us', game: 'retail' });
+    expect(getItem).toHaveBeenCalledWith('19019', { region: 'us' });
     expect(searchItems).not.toHaveBeenCalled();
 
     const embed = replyEmbed(target);
     expect(embed.title).toBe('Thunderfury, Blessed Blade of the Windseeker');
-    expect(embed.url).toBe('https://www.wowhead.com/item=19019');
+    expect(embed.url).toBe('https://www.wowhead.com/classic/item=19019');
     expect(embed.color).toBe(0xff8000); // legendary orange
     expect(field(embed, 'Item ID').value).toBe('19019');
     expect(field(embed, 'Quality').value).toBe('Legendary');
@@ -98,7 +98,7 @@ describe('/item by name', () => {
 
     await command.execute(target);
 
-    expect(getItem).toHaveBeenCalledWith(19019, { region: 'us', game: 'retail' });
+    expect(getItem).toHaveBeenCalledWith(19019, { region: 'us' });
     expect(replyEmbed(target).title).toContain('Thunderfury');
   });
 
@@ -151,7 +151,7 @@ describe('/item by name', () => {
 
     expect(searchItems).toHaveBeenCalledWith(
       'Thunderfury',
-      expect.objectContaining({ region: 'eu', game: 'retail' })
+      expect.objectContaining({ region: 'eu' })
     );
   });
 });

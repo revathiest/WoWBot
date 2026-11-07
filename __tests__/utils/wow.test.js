@@ -144,35 +144,12 @@ describe('discordTimestamp', () => {
   });
 });
 
-describe('armoryUrl', () => {
-  it('builds a region-appropriate armory link', () => {
-    expect(wow.armoryUrl({ region: 'us', realmSlug: 'area-52', characterName: 'Thrall' })).toBe(
-      'https://worldofwarcraft.blizzard.com/en-us/character/us/area-52/thrall'
-    );
-    expect(wow.armoryUrl({ region: 'eu', realmSlug: 'draenor', characterName: 'Jaina' })).toContain(
-      '/en-gb/character/eu/draenor/jaina'
-    );
-  });
-
-  it('falls back to the Americas locale path for unknown regions', () => {
-    expect(wow.armoryUrl({ region: 'zz', realmSlug: 'x', characterName: 'y' })).toContain('/en-us/');
-  });
-});
-
 describe('wowheadItemUrl', () => {
-  // Each path was checked against a real item of that era.
-  it.each([
-    ['anniversary', 'https://www.wowhead.com/tbc/item=32837'],
-    ['classic-era', 'https://www.wowhead.com/classic/item=32837'],
-    ['classic', 'https://www.wowhead.com/mop-classic/item=32837'],
-    ['retail', 'https://www.wowhead.com/item=32837']
-  ])('links %s items to the right database', (game, expected) => {
-    expect(wow.wowheadItemUrl(32837, game)).toBe(expected);
-  });
-
-  it('defaults to retail for an unknown game', () => {
-    expect(wow.wowheadItemUrl(1)).toBe('https://www.wowhead.com/item=1');
-    expect(wow.wowheadItemUrl(1, 'nonsense')).toBe('https://www.wowhead.com/item=1');
+  // There is only one database now: Classic Forever is patch 1.60.1, so the
+  // vanilla path is always correct. Checked against a real item.
+  it('always links to the classic database', () => {
+    expect(wow.wowheadItemUrl(19019)).toBe('https://www.wowhead.com/classic/item=19019');
+    expect(wow.wowheadItemUrl(1)).toBe('https://www.wowhead.com/classic/item=1');
   });
 });
 
@@ -198,20 +175,6 @@ describe('mediaAsset', () => {
     expect(wow.mediaAsset({ avatar_url: 'https://legacy/a.jpg' }, 'avatar')).toBe(
       'https://legacy/a.jpg'
     );
-  });
-});
-
-describe('idFromHref', () => {
-  it('pulls the trailing id out of a connected-realm href', () => {
-    expect(
-      wow.idFromHref('https://us.api.blizzard.com/data/wow/connected-realm/11?namespace=dynamic-us')
-    ).toBe(11);
-    expect(wow.idFromHref('https://us.api.blizzard.com/data/wow/connected-realm/1234')).toBe(1234);
-  });
-
-  it('returns null when there is no id', () => {
-    expect(wow.idFromHref(undefined)).toBeNull();
-    expect(wow.idFromHref('https://example.com/no-id')).toBeNull();
   });
 });
 
@@ -286,17 +249,3 @@ describe('splitCharacterName', () => {
   });
 });
 
-describe('armoryUrl for realmless flavours', () => {
-  it('returns null when there is no realm, because the armory has no such page', () => {
-    // Callers must treat null as "no link" — setting a null URL on an embed
-    // button throws.
-    expect(wow.armoryUrl({ region: 'eu', realmSlug: null, characterName: 'judgement-judy' }))
-      .toBeNull();
-  });
-});
-
-describe('wowheadItemUrl for Classic Forever', () => {
-  it('uses the vanilla database, since Forever is patch 1.60.1', () => {
-    expect(wow.wowheadItemUrl(19019, 'forever')).toBe('https://www.wowhead.com/classic/item=19019');
-  });
-});

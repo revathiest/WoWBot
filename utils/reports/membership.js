@@ -20,25 +20,20 @@ const { characterKey } = require('./links');
  * Sorts a roster into the three states above.
  *
  * @param {object[]} members       From the snapshot: `{ name, surname, level, className }`.
- * @param {string}   realmSlug     The guild's realm, for matching links. Null on
- *                                 realmless flavours, where the surname carries
- *                                 the uniqueness instead.
  * @param {Map}      owners        Character key -> Discord user id.
  * @param {Set|null} presentUserIds Ids currently in the server, or null when
  *                                  the member list could not be read — in which
  *                                  case a link is taken at face value rather
  *                                  than reporting everybody as gone.
  */
-function splitByDiscord(members, realmSlug, owners, presentUserIds = null) {
+function splitByDiscord(members, owners, presentUserIds = null) {
   const onDiscord = [];
   const left = [];
   const unlinked = [];
 
   for (const member of members) {
     const userId =
-      owners?.get?.(
-        characterKey({ name: member.name, surname: member.surname, realm: realmSlug })
-      ) ?? null;
+      owners?.get?.(characterKey({ name: member.name, surname: member.surname })) ?? null;
 
     if (!userId) {
       unlinked.push({ ...member, userId: null });

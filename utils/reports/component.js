@@ -222,11 +222,9 @@ async function handleComponent(interaction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const realmSlug = snapshot.guild?.realmSlug ?? snapshot.guild?.realm;
   const members = Object.values(snapshot.members ?? {}).map(member => ({
     name: member.name,
-    // Carried through so realmless characters still match their links — the
-    // surname is half of their identity. Null everywhere else.
+    // The other half of the character's identity — there is no realm.
     surname: member.surname ?? null,
     level: member.level,
     className: member.className
@@ -242,7 +240,7 @@ async function handleComponent(interaction) {
   }
 
   const presentUserIds = serverMembers ? new Set([...serverMembers.keys()]) : null;
-  const split = splitByDiscord(members, realmSlug, buildOwnerIndex(), presentUserIds);
+  const split = splitByDiscord(members, buildOwnerIndex(), presentUserIds);
 
   const outsiders = serverMembers ? discordOnly(serverMembers.values(), rosterUserIds(split)) : [];
   const messages = buildBreakdownMessages({ guild: snapshot.guild, split, outsiders });

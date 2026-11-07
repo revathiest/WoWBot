@@ -5,14 +5,12 @@ const {
 } = require('../../../utils/reports/membership');
 const { characterKey } = require('../../../utils/reports/links');
 
-const REALM = 'nightslayer';
-
 function owners(entries) {
-  return new Map(entries.map(([name, userId]) => [characterKey({ name, realm: REALM }), userId]));
+  return new Map(entries.map(([name, surname, userId]) => [characterKey({ name, surname }), userId]));
 }
 
-function member(name, level = 70) {
-  return { name, level, className: 'Rogue' };
+function member(name, surname = 'Smith', level = 10) {
+  return { name, surname, level, className: 'Rogue' };
 }
 
 beforeEach(() => jest.spyOn(console, 'warn').mockImplementation(() => {}));
@@ -21,13 +19,12 @@ afterEach(() => jest.restoreAllMocks());
 describe('splitByDiscord', () => {
   it('counts a linked character whose owner is present as on Discord', () => {
     const split = splitByDiscord(
-      [member('Butud')],
-      REALM,
-      owners([['Butud', 'u1']]),
+      [member('Judgement', 'Judy')],
+      owners([['Judgement', 'Judy', 'u1']]),
       new Set(['u1'])
     );
 
-    expect(split.onDiscord.map(m => m.name)).toEqual(['Butud']);
+    expect(split.onDiscord.map(m => m.name)).toEqual(['Judgement']);
     expect(split.left).toEqual([]);
     expect(split.unlinked).toEqual([]);
   });
@@ -35,44 +32,58 @@ describe('splitByDiscord', () => {
   it('separates a linked character whose owner has left', () => {
     // Different follow-up from "never linked", so they are not merged.
     const split = splitByDiscord(
-      [member('Butud')],
-      REALM,
-      owners([['Butud', 'u1']]),
+      [member('Judgement', 'Judy')],
+      owners([['Judgement', 'Judy', 'u1']]),
       new Set(['someone-else'])
     );
 
-    expect(split.left.map(m => m.name)).toEqual(['Butud']);
+    expect(split.left.map(m => m.name)).toEqual(['Judgement']);
     expect(split.onDiscord).toEqual([]);
   });
 
   it('treats an unclaimed character as unlinked', () => {
-    const split = splitByDiscord([member('Stranger')], REALM, new Map(), new Set());
+    const split = splitByDiscord([member('Stranger', 'Smith')], new Map(), new Set());
 
     expect(split.unlinked.map(m => m.name)).toEqual(['Stranger']);
   });
 
   it('takes a link at face value when the member list could not be read', () => {
     // Otherwise a failed fetch would report the entire guild as having left.
-    const split = splitByDiscord([member('Butud')], REALM, owners([['Butud', 'u1']]), null);
+    const split = splitByDiscord(
+      [member('Judgement', 'Judy')],
+      owners([['Judgement', 'Judy', 'u1']]),
+      null
+    );
 
-    expect(split.onDiscord.map(m => m.name)).toEqual(['Butud']);
+    expect(split.onDiscord.map(m => m.name)).toEqual(['Judgement']);
     expect(split.left).toEqual([]);
   });
 
-  it('matches a typed realm name against the roster slug', () => {
-    const byName = new Map([[characterKey({ name: 'Butud', realm: 'Area 52' }), 'u1']]);
-    const split = splitByDiscord([member('Butud')], 'area-52', byName, null);
+  it('keeps two characters with the same first name apart by surname', () => {
+    const byName = owners([
+      ['Judgement', 'Judy', 'u1'],
+      ['Judgement', 'Smith', 'u2']
+    ]);
+    const split = splitByDiscord(
+      [member('Judgement', 'Judy'), member('Judgement', 'Smith')],
+      byName,
+      null
+    );
 
-    expect(split.onDiscord).toHaveLength(1);
+    expect(split.onDiscord.map(m => m.userId).sort()).toEqual(['u1', 'u2']);
   });
 
   it('carries the owner id through for the breakdown', () => {
-    const split = splitByDiscord([member('Butud')], REALM, owners([['Butud', 'u1']]), null);
+    const split = splitByDiscord(
+      [member('Judgement', 'Judy')],
+      owners([['Judgement', 'Judy', 'u1']]),
+      null
+    );
     expect(split.onDiscord[0].userId).toBe('u1');
   });
 
   it('handles an empty roster', () => {
-    expect(splitByDiscord([], REALM, new Map(), null)).toEqual({
+    expect(splitByDiscord([], new Map(), null)).toEqual({
       onDiscord: [],
       left: [],
       unlinked: []

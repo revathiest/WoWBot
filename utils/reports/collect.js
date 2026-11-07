@@ -3,17 +3,14 @@
 // into a snapshot.
 //
 // Cost, for a 240-member guild: one roster call, one class index (cached for a
-// day), three leaderboard calls (cached ten minutes by pvp.js), and one
-// honorable-kill call per member. The per-member calls dominate, so they run
-// concurrently and tolerate individual failures — one character with a broken
-// profile must not cost the guild its report.
+// day), and one honorable-kill call per member. The per-member calls dominate,
+// so they run concurrently and tolerate individual failures — one character
+// with a broken profile must not cost the guild its report.
 
 const { getPlayableClassIndex } = require('../blizzard/gameData');
 const { getGuildRoster, slugifyGuild } = require('../blizzard/guild');
-const { getCharacterPvpSummary, getCurrentSeasonId, getLeaderboard, BRACKETS } = require('../blizzard/pvp');
-const { resolveRealm } = require('../blizzard/realms');
-const { characterSlug, encodeCharacterName } = require('../wow');
-const { isRealmless } = require('../../config');
+const { getCharacterPvpSummary } = require('../blizzard/profile');
+const { characterSlug } = require('../wow');
 const { buildSnapshot, memberKey } = require('./diff');
 
 // Blizzard allows 100 requests a second; this stays far under it while still
@@ -25,7 +22,7 @@ const KILL_CONCURRENCY = 8;
 // over the limit still gets its raiders counted.
 const MAX_KILL_LOOKUPS = 500;
 
-// Class names change only when Blizzard ships an expansion.
+// Class names change almost never.
 const CLASS_INDEX_TTL_MS = 24 * 60 * 60 * 1000;
 
 const classIndexCache = new Map();
@@ -35,32 +32,31 @@ function clearClassIndexCache() {
 }
 
 /**
- * Class id -> name for a game version.
+ * Class id -> name for a region.
  *
- * Guild rosters on Anniversary carry `playable_class.id` but no name, so
- * printing a member's class means resolving ids separately. Failure is
- * non-fatal: the report simply omits class names.
+ * Guild rosters carry `playable_class.id` but no name, so printing a member's
+ * class means resolving ids separately. Failure is non-fatal: the report
+ * simply omits class names.
  */
-async function getClassNames({ region, game }) {
-  const key = `${region}:${game}`;
-  const cached = classIndexCache.get(key);
+async function getClassNames({ region }) {
+  const cached = classIndexCache.get(region);
 
   if (cached && cached.expiresAt > Date.now()) return cached.names;
 
   const names = new Map();
 
   try {
-    const index = await getPlayableClassIndex({ region, game });
+    const index = await getPlayableClassIndex({ region });
     for (const playableClass of index?.classes ?? []) {
       if (Number.isFinite(playableClass.id) && playableClass.name) {
         names.set(playableClass.id, playableClass.name);
       }
     }
   } catch (err) {
-    console.warn(`⚠️  Could not read the class index for ${key}: ${err.message}`);
+    console.warn(`⚠️  Could not read the class index for ${region}: ${err.message}`);
   }
 
-  classIndexCache.set(key, { expiresAt: Date.now() + CLASS_INDEX_TTL_MS, names });
+  classIndexCache.set(region, { expiresAt: Date.now() + CLASS_INDEX_TTL_MS, names });
   return names;
 }
 
@@ -82,65 +78,18 @@ async function mapWithConcurrency(items, limit, mapper) {
 }
 
 /**
- * Every guild member's arena standing, keyed by member name.
- *
- * A ladder is scanned once per bracket rather than queried per character: one
- * bracket is around 5,000 entries and there is no per-character ladder lookup,
- * so three passes over three cached lists beats hundreds of requests.
- */
-async function collectArena({ region, game, realmSlug, brackets = BRACKETS }) {
-  const seasonId = await getCurrentSeasonId({ region, game });
-  if (seasonId === null) return { seasonId: null, standings: new Map() };
-
-  const standings = new Map();
-
-  for (const bracket of brackets) {
-    let entries;
-
-    try {
-      entries = await getLeaderboard(seasonId, bracket, { region, game });
-    } catch (err) {
-      console.warn(`⚠️  Could not read the ${bracket} ladder: ${err.message}`);
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (entry.character?.realm?.slug !== realmSlug) continue;
-
-      const key = memberKey(entry.character?.name);
-      if (!key) continue;
-
-      const stats = entry.season_match_statistics ?? {};
-      const forMember = standings.get(key) ?? {};
-
-      forMember[bracket] = {
-        rating: entry.rating,
-        rank: entry.rank,
-        won: stats.won ?? 0,
-        lost: stats.lost ?? 0
-      };
-
-      standings.set(key, forMember);
-    }
-  }
-
-  return { seasonId, standings };
-}
-
-/**
  * Lifetime honorable kills per member.
  *
- * Verified present on TBC Anniversary — `pvp-summary` returns `honorable_kills`
- * there, which is what makes a weekly PvP section possible at all.
+ * `pvp-summary` 200s for Classic Forever and returns `honorable_kills` — the
+ * vanilla honour system, not arena, which this flavour has none of.
  *
- * A 404 here is NORMAL and is counted separately from a failure. Measured
- * against a real 240-member guild, 23 members had no PvP summary: bank alts
- * parked at level 1, plus a few characters whose profile Blizzard has not
- * published. Reporting those as errors would put a warning on every single
+ * A 404 here is NORMAL and is counted separately from a failure: characters
+ * below level 10, and those not yet logged out once, have no published
+ * profile. Reporting those as errors would put a warning on every single
  * report and teach people to ignore it. Only a non-404 — a rate limit, a 5xx,
  * a timeout — means something actually went wrong.
  */
-async function collectKills(members, { region, game, realmSlug, concurrency = KILL_CONCURRENCY, onProgress }) {
+async function collectKills(members, { region, concurrency = KILL_CONCURRENCY, onProgress }) {
   const targets = [...members]
     .sort((a, b) => (b.level ?? 0) - (a.level ?? 0))
     .slice(0, MAX_KILL_LOOKUPS);
@@ -151,21 +100,18 @@ async function collectKills(members, { region, game, realmSlug, concurrency = KI
   let done = 0;
 
   await mapWithConcurrency(targets, concurrency, async member => {
-    const address = memberAddress(member, realmSlug);
+    const slug = characterSlug(member.name, member.surname);
 
-    // A realmless member with no surname cannot be addressed at all. Count it
-    // with the misses rather than firing a request that must 404.
-    if (!address) {
+    // A member with no surname cannot be addressed at all. Count it with the
+    // misses rather than firing a request that must 404.
+    if (!slug) {
       missing += 1;
       done += 1;
       return;
     }
 
     try {
-      const summary = await getCharacterPvpSummary(address.realmSlug, address.characterName, {
-        region,
-        game
-      });
+      const summary = await getCharacterPvpSummary(slug, { region });
 
       if (Number.isFinite(summary?.honorable_kills)) {
         kills.set(memberKey(member.name, member.surname), summary.honorable_kills);
@@ -188,17 +134,16 @@ async function collectKills(members, { region, game, realmSlug, concurrency = KI
   };
 }
 
-/** Roster entries in the shape the snapshot wants, minus kills and arena. */
+/** Roster entries in the shape the snapshot wants, minus kills. */
 function readRoster(roster, classNames) {
   return (roster?.members ?? [])
     .map(member => ({
       name: member.character?.name,
-      // Classic Forever only: the other half of the name, and the only thing
-      // that tells two same-named roster members apart.
+      // The other half of the name, and the only thing that tells two
+      // same-named roster members apart.
       surname: member.character?.surname ?? null,
       level: member.character?.level,
       rank: member.rank,
-      // Roster entries carry an id and, on retail only, a name.
       className:
         member.character?.playable_class?.name ??
         classNames.get(member.character?.playable_class?.id) ??
@@ -208,64 +153,32 @@ function readRoster(roster, classNames) {
 }
 
 /**
- * How to address one roster member in a profile request.
- *
- * Mirrors `resolveCharacterTarget` for code that has a roster rather than an
- * interaction. Returns null when a realmless member has no surname, which would
- * make an unanswerable request — the caller counts that as a miss.
- */
-function memberAddress(member, realmSlug) {
-  if (realmSlug) {
-    return { realmSlug, characterName: encodeCharacterName(member.name) };
-  }
-
-  const slug = characterSlug(member.name, member.surname);
-
-  return slug ? { realmSlug: null, characterName: slug } : null;
-}
-
-/**
  * Builds one guild's snapshot.
  *
- * @returns {Promise<{snapshot: object, warnings: string[], realmSlug: string, guildSlug: string}>}
+ * @returns {Promise<{snapshot: object, warnings: string[], guildSlug: string}>}
  */
 async function collectSnapshot(guild, { capturedAt = Date.now(), concurrency, onProgress, includeKills = true } = {}) {
-  const { region, game } = guild;
-  // Classic Forever has no realms: the guild and every character in it are
-  // addressed by slug alone, and a null slug is what the path builders want.
-  const realm = isRealmless(game)
-    ? { slug: null, name: null, resolved: true }
-    : await resolveRealm(guild.realm, { region, game });
+  const { region } = guild;
   const guildSlug = slugifyGuild(guild.name);
   const warnings = [];
 
   let roster;
   try {
-    roster = await getGuildRoster(realm.slug, guildSlug, { region, game });
+    roster = await getGuildRoster(guildSlug, { region });
   } catch (err) {
     // There is no guild index to suggest names from, so the best help available
-    // is naming the slugs that were tried. The command turns these into a
+    // is naming the slug that was tried. The command turns this into a
     // message; see the note in utils/blizzard/guild.js.
-    err.realmSlug = realm.slug;
     err.guildSlug = guildSlug;
     throw err;
   }
 
-  const classNames = await getClassNames({ region, game });
+  const classNames = await getClassNames({ region });
   const members = readRoster(roster, classNames);
-
-  const { seasonId, standings } = await collectArena({ region, game, realmSlug: realm.slug });
-  if (seasonId === null) warnings.push('No PvP season is published for this game version, so there is no arena section.');
 
   let kills = new Map();
   if (includeKills) {
-    const collected = await collectKills(members, {
-      region,
-      game,
-      realmSlug: realm.slug,
-      concurrency,
-      onProgress
-    });
+    const collected = await collectKills(members, { region, concurrency, onProgress });
 
     kills = collected.kills;
 
@@ -282,22 +195,17 @@ async function collectSnapshot(guild, { capturedAt = Date.now(), concurrency, on
   const snapshot = buildSnapshot({
     guild: {
       name: roster?.guild?.name ?? guild.name,
-      realm: roster?.guild?.realm?.name ?? realm.name,
-      realmSlug: realm.slug,
       faction: roster?.guild?.faction?.name ?? null,
-      region,
-      game,
-      seasonId
+      region
     },
     capturedAt,
     members: members.map(member => ({
       ...member,
-      kills: kills.get(memberKey(member.name, member.surname)) ?? null,
-      brackets: standings.get(memberKey(member.name, member.surname)) ?? {}
+      kills: kills.get(memberKey(member.name, member.surname)) ?? null
     }))
   });
 
-  return { snapshot, warnings, realmSlug: realm.slug, guildSlug };
+  return { snapshot, warnings, guildSlug };
 }
 
 module.exports = {
@@ -305,7 +213,6 @@ module.exports = {
   KILL_CONCURRENCY,
   MAX_KILL_LOOKUPS,
   clearClassIndexCache,
-  collectArena,
   collectKills,
   collectSnapshot,
   getClassNames,

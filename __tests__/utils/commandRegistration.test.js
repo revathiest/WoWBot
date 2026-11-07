@@ -54,7 +54,6 @@ describe('loadCommandsRecursively', () => {
     const commands = loadCommandsRecursively();
 
     expect([...commands.keys()].sort()).toEqual([
-      'arena',
       'audit',
       'auditlog',
       'autokick',
@@ -63,13 +62,11 @@ describe('loadCommandsRecursively', () => {
       'help',
       'iam',
       'item',
-      'mythicplus',
       'realm',
       'realms',
       'report',
       'spam',
-      'ticket',
-      'token'
+      'ticket'
     ]);
   });
 

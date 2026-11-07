@@ -18,7 +18,6 @@ const MAX_FIELD_LENGTH = 1024;
 // How many names each section lists before collapsing into a count. Long enough
 // to feel complete for a normal week, short enough to stay readable on a phone.
 const MAX_LISTED = 10;
-const MAX_LADDER_LISTED = 5;
 
 /** "1 person" / "3 people" — the counts read as prose, so they have to agree. */
 function countOf(value, singular, plural) {
@@ -31,14 +30,20 @@ function formatChange(value) {
   return value > 0 ? `+${formatNumber(value)}` : formatNumber(value);
 }
 
+/** "Judgement Judy" — the full name, since the surname is half of it. */
+function fullName(entry) {
+  return [entry.name, entry.surname].filter(Boolean).join(' ');
+}
+
 /**
  * A character's name, upgraded to include a Discord mention when the person has
  * linked it with /iam. Reports work fine with nobody linked — that is the point
  * of building them from the roster rather than from registrations.
  */
-function nameOf(entry, realmSlug, owners) {
-  const userId = owners?.get?.(characterKey({ name: entry.name, realm: realmSlug }));
-  return userId ? `**${entry.name}** (<@${userId}>)` : `**${entry.name}**`;
+function nameOf(entry, owners) {
+  const userId = owners?.get?.(characterKey({ name: entry.name, surname: entry.surname }));
+  const name = fullName(entry);
+  return userId ? `**${name}** (<@${userId}>)` : `**${name}**`;
 }
 
 /**
@@ -69,56 +74,35 @@ function addList(embed, name, lines, options) {
   embed.addFields({ name, value: listField(lines, options) });
 }
 
-/** "Apex · Nightslayer" — the guild line under the title. */
+/** Just the guild's name — it has no realm. */
 function guildLabel(guild) {
-  return [guild?.name, guild?.realm].filter(Boolean).join(' · ');
+  return guild?.name ?? '';
 }
 
-function membershipLines(entries, realmSlug, owners) {
+function membershipLines(entries, owners) {
   return entries.map(entry => {
     const detail = [entry.className, entry.level ? `level ${entry.level}` : null]
       .filter(Boolean)
       .join(', ');
-    return `${nameOf(entry, realmSlug, owners)}${detail ? ` — ${detail}` : ''}`;
+    return `${nameOf(entry, owners)}${detail ? ` — ${detail}` : ''}`;
   });
 }
 
-function levelLines(entries, realmSlug, owners) {
+function levelLines(entries, owners) {
   return entries.map(entry => {
     const arrow = `${entry.from} → ${entry.to}`;
-    return `${nameOf(entry, realmSlug, owners)} — ${arrow}${entry.cappedOut ? ' 🎉' : ''}`;
+    return `${nameOf(entry, owners)} — ${arrow}${entry.cappedOut ? ' 🎉' : ''}`;
   });
 }
 
-function rankLines(entries, realmSlug, owners) {
-  return entries.map(
-    entry => `${nameOf(entry, realmSlug, owners)} — rank ${entry.from} → ${entry.to}`
-  );
+function rankLines(entries, owners) {
+  return entries.map(entry => `${nameOf(entry, owners)} — rank ${entry.from} → ${entry.to}`);
 }
 
-/**
- * "`#22` **Butud** — 1950 (+150) · 20W/7L"
- *
- * On a first run every entry is technically new, so the "(new)" marker is
- * suppressed — it means "started playing this bracket this week", which is only
- * true once there is a previous week.
- */
-function ladderLines(entries, realmSlug, owners, { isFirstRun = false } = {}) {
-  return entries.map(entry => {
-    const rank = entry.rank === null ? '' : `\`#${formatNumber(entry.rank)}\` `;
-    const change = isFirstRun ? null : entry.isNew ? 'new' : formatChange(entry.ratingChange);
-    const record = `${entry.won}W/${entry.lost}L`;
-
-    return `${rank}${nameOf(entry, realmSlug, owners)} — ${formatNumber(entry.rating)}${
-      change ? ` (${change})` : ''
-    } · ${record}`;
-  });
-}
-
-function killLines(entries, realmSlug, owners) {
+function killLines(entries, owners) {
   return entries.map(
     entry =>
-      `${nameOf(entry, realmSlug, owners)} — **+${formatNumber(entry.change)}** (${formatNumber(
+      `${nameOf(entry, owners)} — **+${formatNumber(entry.change)}** (${formatNumber(
         entry.total
       )} total)`
   );
@@ -176,8 +160,6 @@ function describePeriod(diff) {
  * @param {string[]} warnings  Anything the collector could not fetch.
  */
 function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUserIds = null }) {
-  const realmSlug = diff.guild?.realmSlug ?? diff.guild?.realm;
-
   const embed = new EmbedBuilder()
     .setColor(factionColor(diff.guild?.faction))
     .setTitle(`Weekly Report — ${guildLabel(diff.guild)}`)
@@ -189,13 +171,12 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUser
       name: diff.maxLevel === null ? 'At Max Level' : `At Level ${diff.maxLevel}`,
       value: formatNumber(diff.totals.atMaxLevel),
       inline: true
-    },
-    { name: 'Arena Ranked', value: formatNumber(diff.totals.ranked), inline: true }
+    }
   );
 
   // Headline numbers only. Who they actually are is a button press away, so the
   // report does not turn into a wall of names.
-  const split = splitByDiscord(diff.members ?? [], realmSlug, owners, presentUserIds);
+  const split = splitByDiscord(diff.members ?? [], owners, presentUserIds);
   const people = countPeople(split);
 
   if (diff.members?.length > 0) {
@@ -217,37 +198,22 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUser
     );
   }
 
-  addList(embed, `📥 Joined (${diff.joined.length})`, membershipLines(diff.joined, realmSlug, owners));
-  addList(embed, `📤 Left (${diff.left.length})`, membershipLines(diff.left, realmSlug, owners));
-  addList(embed, `⬆️ Level-ups (${diff.levelUps.length})`, levelLines(diff.levelUps, realmSlug, owners));
-  addList(embed, `🎖️ Promotions (${diff.promotions.length})`, rankLines(diff.promotions, realmSlug, owners));
-
-  for (const bracket of diff.arena) {
-    embed.addFields({
-      name: `⚔️ ${bracket.bracket} (${bracket.entries.length} ranked)`,
-      value: listField(ladderLines(bracket.entries, realmSlug, owners, { isFirstRun: diff.isFirstRun }), {
-        max: MAX_LADDER_LISTED
-      })
-    });
-  }
-
-  addList(embed, '💀 Honorable Kills', killLines(diff.kills, realmSlug, owners));
+  addList(embed, `📥 Joined (${diff.joined.length})`, membershipLines(diff.joined, owners));
+  addList(embed, `📤 Left (${diff.left.length})`, membershipLines(diff.left, owners));
+  addList(embed, `⬆️ Level-ups (${diff.levelUps.length})`, levelLines(diff.levelUps, owners));
+  addList(embed, `🎖️ Promotions (${diff.promotions.length})`, rankLines(diff.promotions, owners));
+  addList(embed, '💀 Honorable Kills', killLines(diff.kills, owners));
 
   // A quiet week is a real result, and saying so beats an embed of bare totals
   // that looks like something failed.
   const hasContent =
-    diff.joined.length +
-      diff.left.length +
-      diff.levelUps.length +
-      diff.promotions.length +
-      diff.arena.length +
-      diff.kills.length >
+    diff.joined.length + diff.left.length + diff.levelUps.length + diff.promotions.length + diff.kills.length >
     0;
 
   if (!hasContent && !diff.isFirstRun) {
     embed.addFields({
       name: 'Quiet week',
-      value: 'No roster changes, no ladder movement, and no honorable kills recorded.'
+      value: 'No roster changes, and no honorable kills recorded.'
     });
   }
 
@@ -256,14 +222,7 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUser
   }
 
   const captured = discordTimestamp(diff.capturedAt, 'f');
-  embed.setFooter({
-    text: [
-      diff.guild?.seasonId ? `Season ${diff.guild.seasonId}` : null,
-      `${diff.guild?.region?.toUpperCase?.() ?? ''}`.trim() || null
-    ]
-      .filter(Boolean)
-      .join(' • ')
-  });
+  embed.setFooter({ text: `${diff.guild?.region?.toUpperCase?.() ?? ''}`.trim() });
 
   if (captured) embed.setTimestamp(new Date(diff.capturedAt));
 
@@ -273,7 +232,6 @@ function buildReportEmbed({ diff, owners = new Map(), warnings = [], presentUser
 module.exports = {
   ROSTER_BUTTON_PREFIX,
   MAX_FIELD_LENGTH,
-  MAX_LADDER_LISTED,
   MAX_LISTED,
   buildReportEmbed,
   buildRosterComponents,
@@ -282,7 +240,6 @@ module.exports = {
   formatChange,
   guildLabel,
   killLines,
-  ladderLines,
   levelLines,
   listField,
   membershipLines,

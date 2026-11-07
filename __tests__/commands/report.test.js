@@ -24,7 +24,7 @@ const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/report');
 const { createInteraction } = require('../helpers/interaction');
 
-const APEX = { name: 'Apex', realm: 'Nightslayer', region: 'us', game: 'anniversary', channelId: null };
+const APEX = { name: 'Apex', region: 'eu', channelId: null };
 
 function config(overrides = {}) {
   return { ...DEFAULTS, channelId: 'channel-1', guilds: [APEX], ...overrides };
@@ -80,6 +80,11 @@ describe('command shape', () => {
     const names = command.data.toJSON().options.map(option => option.name);
     expect(names).toEqual(expect.arrayContaining(['status', 'now', 'post', 'track', 'untrack', 'configure']));
   });
+
+  it('takes no realm option — guilds have none', () => {
+    const track = command.data.toJSON().options.find(option => option.name === 'track');
+    expect(track.options.map(option => option.name)).not.toContain('realm');
+  });
 });
 
 describe('permissions', () => {
@@ -122,8 +127,6 @@ describe('/report status', () => {
   });
 
   it('flags a tracked guild with nowhere to post', async () => {
-    loadConfig.mockReturnValue(config({ channelId: null }));
-
     const embed = command.buildStatusEmbed(config({ channelId: null })).toJSON();
 
     expect(embed.fields.some(field => field.name.includes('No channel'))).toBe(true);
@@ -144,25 +147,21 @@ describe('/report status', () => {
       '/report track'
     );
   });
+
+  it('describes a guild by name and region alone', () => {
+    expect(command.describeGuild(APEX, config())).toContain('**Apex** (EU)');
+  });
 });
 
 describe('/report track', () => {
-  it('tracks a guild with the realm, region, and game resolved', async () => {
-    const fake = interaction({ subcommand: 'track', options: { guild: 'Apex', realm: 'Nightslayer' } });
+  it('tracks a guild with just the name and region, since there is no realm', async () => {
+    const fake = interaction({ subcommand: 'track', options: { guild: 'Apex', region: 'eu' } });
     await command.execute(fake);
 
     expect(trackGuild).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'Apex', realm: 'Nightslayer', region: 'us' })
+      expect.objectContaining({ name: 'Apex', region: 'eu' })
     );
     expect(said(fake)).toContain('Now reporting on');
-  });
-
-  it('falls back to the configured home realm', async () => {
-    // jest.setup.js pins BLIZZARD_REALM to Testrealm.
-    const fake = interaction({ subcommand: 'track', options: { guild: 'Apex' } });
-    await command.execute(fake);
-
-    expect(trackGuild).toHaveBeenCalledWith(expect.objectContaining({ realm: 'Testrealm' }));
   });
 
   it('accepts a per-guild channel', async () => {
@@ -202,6 +201,13 @@ describe('/report untrack', () => {
 
     expect(deleteSnapshot).toHaveBeenCalled();
     expect(said(fake)).toContain('No longer reporting');
+  });
+
+  it('narrows by region when two tracked guilds share a name', async () => {
+    const fake = interaction({ subcommand: 'untrack', options: { guild: 'Apex', region: 'eu' } });
+    await command.execute(fake);
+
+    expect(untrackGuild).toHaveBeenCalledWith({ name: 'Apex', region: 'eu' });
   });
 
   it('reports a guild that was not tracked', async () => {
@@ -356,16 +362,14 @@ describe('/report configure', () => {
 });
 
 describe('describeFailure', () => {
-  it('names both slugs for a missing guild, since there is no index to search', () => {
+  it('names the slug tried for a missing guild, since there is no index to search', () => {
     const error = Object.assign(new BlizzardApiError('Not found.', { status: 404 }), {
-      realmSlug: 'nightslayer',
       guildSlug: 'apx'
     });
 
     const message = command.describeFailure({ guild: APEX, error });
 
     expect(message).toContain('apx');
-    expect(message).toContain('nightslayer');
   });
 
   it('falls back to the error message for anything else', () => {

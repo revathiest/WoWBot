@@ -29,10 +29,9 @@ const {
 } = require('../../utils/reports/config');
 const { buildAllReports, nextSlotAt, publishReports } = require('../../utils/reports/scheduler');
 const { deleteSnapshot, loadSnapshot } = require('../../utils/reports/history');
-const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
+const { addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const { discordTimestamp, FALLBACK_COLOR } = require('../../utils/wow');
-const { readConfig, GAMES } = require('../../config');
+const { discordTimestamp, FALLBACK_COLOR, REGION_CHOICES } = require('../../utils/wow');
 
 const DAY_CHOICES = DAYS.map((day, index) => ({ name: day, value: index }));
 
@@ -68,16 +67,12 @@ const data = new SlashCommandBuilder()
           .setDescription('Guild name, exactly as it appears in game.')
           .setRequired(true)
       )
-      .addStringOption(option =>
-        option.setName('realm').setDescription('Realm the guild is on. Defaults to the bot\'s realm.')
-      )
       .addChannelOption(option =>
         option
           .setName('channel')
           .setDescription('Post this guild\'s report here instead of the default channel.')
           .addChannelTypes(ChannelType.GuildText)
       );
-    addGameOption(sub);
     addRegionOption(sub);
     return sub;
   })
@@ -89,7 +84,10 @@ const data = new SlashCommandBuilder()
         option.setName('guild').setDescription('Guild name.').setRequired(true)
       )
       .addStringOption(option =>
-        option.setName('realm').setDescription('Realm, if two tracked guilds share a name.')
+        option
+          .setName('region')
+          .setDescription('Region, if two tracked guilds share a name.')
+          .addChoices(...REGION_CHOICES)
       )
   )
   .addSubcommandGroup(group =>
@@ -157,13 +155,12 @@ function describeSchedule(config) {
   return config.frequency === 'weekly' ? `**${DAYS[config.dayOfWeek]}** at **${at}**` : `**Daily** at **${at}**`;
 }
 
-/** "Apex · Nightslayer (US · TBC Anniversary) → #reports" */
+/** "Apex (US) → #reports" */
 function describeGuild(guild, config) {
   const channelId = channelFor(guild, config);
-  const version = GAMES[guild.game]?.label ?? guild.game;
 
   return (
-    `**${guild.name}** · ${guild.realm} (${guild.region.toUpperCase()} · ${version})` +
+    `**${guild.name}** (${guild.region.toUpperCase()})` +
     ` → ${channelId ? `<#${channelId}>` : '_no channel_'}`
   );
 }
@@ -231,11 +228,11 @@ function buildStatusEmbed(config) {
   return embed;
 }
 
-/** Turns a roster 404 into something actionable, naming the slugs that were tried. */
+/** Turns a roster 404 into something actionable, naming the slug that was tried. */
 function describeFailure({ guild, error }) {
   if ((error instanceof BlizzardApiError || error?.name === 'BlizzardApiError') && error.status === 404) {
     return (
-      `**${guild.name}** — no guild found at \`${error.guildSlug}\` on \`${error.realmSlug}\`. ` +
+      `**${guild.name}** — no guild found at \`${error.guildSlug}\`. ` +
       'Guild names have no index to search, so the name must match in-game exactly.'
     );
   }
@@ -320,43 +317,35 @@ async function postNow(interaction) {
 
 function track(interaction) {
   const scope = resolveScope(interaction);
-  const config = readConfig();
 
   const name = interaction.options.getString('guild');
-  const realm = (interaction.options.getString('realm') ?? '').trim() || config.blizzard.realm;
   const channel = interaction.options.getChannel('channel');
-
-  if (!realm) {
-    return '❌ No realm given, and no default realm is configured. Pass the `realm` option.';
-  }
 
   const { added, reason } = trackGuild({
     name,
-    realm,
     region: scope.region,
-    game: scope.game,
     channelId: channel?.id ?? null
   });
 
   if (added) {
     return (
-      `✅ Now reporting on **${name}** · ${realm} (${scope.label})` +
+      `✅ Now reporting on **${name}** (${scope.label})` +
       `${channel ? ` in <#${channel.id}>` : ''}. ` +
       'The first report records a starting position; changes appear from the second onward.'
     );
   }
 
-  if (reason === 'duplicate') return `⚠️ **${name}** on ${realm} is already tracked.`;
+  if (reason === 'duplicate') return `⚠️ **${name}** (${scope.label}) is already tracked.`;
   if (reason === 'full') return `❌ Already tracking ${MAX_TRACKED_GUILDS} guilds — untrack one first.`;
 
-  return '❌ That guild could not be added. A name and a realm are both required.';
+  return '❌ That guild could not be added. A name is required.';
 }
 
 function untrack(interaction) {
   const name = interaction.options.getString('guild');
-  const realm = interaction.options.getString('realm');
+  const region = interaction.options.getString('region');
 
-  const { removed, removedGuilds } = untrackGuild({ name, realm });
+  const { removed, removedGuilds } = untrackGuild({ name, region });
 
   if (!removed) {
     return `⚠️ **${name}** is not tracked. \`/report status\` lists what is.`;

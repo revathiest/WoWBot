@@ -16,7 +16,7 @@
 // Deliberately free of discord.js and of `fetch`, so the whole list and its
 // state machine are testable with plain objects.
 
-/** The namespace this watcher exists for. A key of GAMES in `config/`. */
+/** The namespace this watcher exists for — the one and only flavour this bot serves. */
 const WATCHED_GAME = 'forever';
 
 /**

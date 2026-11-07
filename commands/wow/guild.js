@@ -4,13 +4,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getGuildRoster, slugifyGuild } = require('../../utils/blizzard/guild');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const {
-  addGameOption,
-  addRealmOption,
-  addRegionOption,
-  resolveRealmTarget,
-  resolveScope
-} = require('../../utils/commandOptions');
+const { addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { classColor, factionColor, formatNumber } = require('../../utils/wow');
 
 const MAX_LISTED = 15;
@@ -25,8 +19,6 @@ const data = new SlashCommandBuilder()
       .setRequired(true)
   );
 
-addRealmOption(data);
-addGameOption(data);
 addRegionOption(data);
 
 /** Counts members per level, highest first. */
@@ -68,7 +60,7 @@ function buildEmbed({ roster, scope, maxLevel }) {
 
   const embed = new EmbedBuilder()
     .setColor(factionColor(guild.faction?.name))
-    .setTitle(`${guild.name ?? 'Guild'} — ${guild.realm?.name ?? scope.label}`)
+    .setTitle(`${guild.name ?? 'Guild'} — ${scope.label}`)
     .addFields(
       { name: 'Members', value: formatNumber(members.length), inline: true },
       { name: `At Level ${maxLevel}`, value: formatNumber(atMax.length), inline: true },
@@ -122,32 +114,17 @@ async function execute(interaction) {
 
   const guildName = interaction.options.getString('guild');
   const scope = resolveScope(interaction);
-
-  // Realmless flavours (Classic Forever) address a guild by slug alone — see
-  // `guildPath` in utils/blizzard/guild.js.
-  const target = await resolveRealmTarget({ interaction, scope });
-
-  if (target.error) {
-    await interaction.editReply(`❌ ${target.error}`);
-    return;
-  }
-
   const guildSlug = slugifyGuild(guildName);
 
-  // Max level differs per game version, and there is no endpoint for it, so take
-  // the highest level actually present on the roster.
+  // There is no level cap endpoint, so take the highest level actually present
+  // on the roster.
   let roster;
   try {
-    roster = await getGuildRoster(target.realmSlug, guildSlug, {
-      region: scope.region,
-      game: scope.game
-    });
+    roster = await getGuildRoster(guildSlug, { region: scope.region });
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
-      const where = target.realmLabel ? ` on **${target.realmLabel}**` : '';
-
       await interaction.editReply(
-        `❌ No guild called **${guildName}**${where} (${scope.label}).\n` +
+        `❌ No guild called **${guildName}** (${scope.label}).\n` +
           `Looked for \`${guildSlug}\`. Guild names must be spelled as they appear in game, ` +
           'and there is no guild index to suggest near matches from.'
       );

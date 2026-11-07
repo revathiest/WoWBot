@@ -152,17 +152,9 @@ function buildAnnouncement({
   // realm group rather than anything players can log in to.
   if (regionName) description.push(`Region: ${regionName}`);
 
-  if (arrivals.some(change => change.key === 'dynamic.realm-index')) {
-    description.push(
-      '\n**The realm index is live.** That was the blocker — `forever` can now be ' +
-        'promoted from `PENDING_GAMES` to `GAMES` in `config/index.js`, which is the ' +
-        'one-line change that exposes it as a `game` choice.'
-    );
-  }
-
   embed.setDescription(description.join('\n'));
 
-  // Ten fields keeps the embed readable; there are only nine checks, so this is
+  // Ten fields keeps the embed readable; there are only five checks, so this is
   // a guard rather than a routine truncation.
   for (const change of changes.slice(0, 10)) {
     const field = describeChange(change);

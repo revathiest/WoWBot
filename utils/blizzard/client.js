@@ -129,11 +129,10 @@ function retryDelayMs(response, attempt) {
 /**
  * Performs an authenticated GET against the Battle.net API.
  *
- * @param {string} path        Path beginning with a slash, e.g. `/data/wow/token/index`.
+ * @param {string} path        Path beginning with a slash, e.g. `/data/wow/ruleset/index`.
  * @param {object} options
  * @param {string} options.namespace  One of `profile`, `static`, `dynamic`.
  * @param {string} [options.region]   Defaults to the configured region.
- * @param {string} [options.game]     `retail`, `classic`, or `classic-era`.
  * @param {string} [options.locale]   Defaults to the configured locale.
  * @param {object} [options.searchParams] Extra query string values.
  * @returns {Promise<object>} Parsed JSON body.
@@ -142,12 +141,11 @@ async function request(path, options = {}) {
   const config = options.config ?? readConfig();
   const region = options.region ?? config.blizzard.region;
   const locale = options.locale ?? config.blizzard.locale;
-  const game = options.game ?? config.blizzard.game;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const url = new URL(path, apiHost(region));
 
-  url.searchParams.set('namespace', buildNamespace(options.namespace, game, region));
+  url.searchParams.set('namespace', buildNamespace(options.namespace, region));
   url.searchParams.set('locale', locale);
 
   for (const [key, value] of Object.entries(options.searchParams ?? {})) {

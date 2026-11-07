@@ -176,22 +176,6 @@ describe('buildAnnouncement', () => {
     expect(embed.data.description).not.toContain('Region:');
   });
 
-  it('spells out the next step when the realm index arrives', () => {
-    const embed = buildAnnouncement({
-      changes: [{ key: 'dynamic.realm-index', from: 'pending', to: 'available' }]
-    });
-
-    expect(embed.data.description).toContain('PENDING_GAMES');
-  });
-
-  it('does not claim the realm index arrived when it did not', () => {
-    const embed = buildAnnouncement({
-      changes: [{ key: 'dynamic.token', from: 'pending', to: 'available' }]
-    });
-
-    expect(embed.data.description).not.toContain('PENDING_GAMES');
-  });
-
   it('adds a field per change', () => {
     const embed = buildAnnouncement({
       changes: [

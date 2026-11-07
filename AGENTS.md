@@ -2,19 +2,27 @@
 
 Conventions for anyone — human or agent — working in this repository.
 
+This bot serves exactly ONE WoW flavour: **Classic Forever**, patch 1.60.1. That
+was a deliberate pivot (2026-11-06) — earlier versions of this file described a
+multi-flavour bot (retail, TBC Anniversary, Classic, Classic Era) with Forever as
+one option among several. All of that is gone: no `game` picker, no realm
+concept anywhere, and three commands (`/token`, `/arena`, `/mythicplus`) were
+deleted outright because their whole purpose depends on something this flavour
+does not have.
+
 ## Shape of the project
 
 - **CommonJS, not ESM.** `require` / `module.exports` throughout. Do not add `"type": "module"`.
 - **No database.** Everything from the Blizzard API is fetched per request. Four JSON files under `data/` are the exceptions, and each earned its place:
   - `spam.json` — moderation settings, so `/spam configure` survives a restart.
-  - `reports.json` — weekly-report settings: which WoW guilds are tracked, where and when to post.
+  - `reports.json` — weekly-report settings: which WoW guilds are tracked (by name and region only — there is no realm), where and when to post.
   - `reports/<guild-key>.json` — last week's snapshot per tracked guild. **This one is load-bearing, not a cache.** The Blizzard API reports only current state — a season's total wins, a lifetime honorable-kill count, today's roster — so "gained 180 rating this week" cannot be computed without keeping last week's numbers to subtract from. Delete these and every report degrades to a first run.
   - `onboarding.json` — settings for the auto-kick sweep, including the cutoff instant that protects existing members.
   - `onboarding-warned.json` — who has already had the "pick a role" reminder DM, so a restarting bot does not DM the same person repeatedly. Self-prunes every sweep.
   - `tickets.json` — ticket lobby settings, moderator roles, open tickets, and closed-ticket history. Replaces the three MySQL tables the ticket system used in the bot it was ported from.
   - `help.json` — which channel the help post lives in, and the ids of the messages that make it up.
   - `audit.json` — the audit log channel and how much to record.
-  - `links.json` — Discord user id → the characters that person claimed with `/iam`, or that an admin assigned with `/iam manage assign`. **This is the only user data the bot stores**, it is volunteered rather than harvested, it holds nothing but an id and character names, and `/iam forget` deletes a user's entry outright. Keep it that way: do not add display names, activity, or anything the user did not type in themselves.
+  - `links.json` — Discord user id → the characters that person claimed with `/iam`, or that an admin assigned with `/iam manage assign`. **This is the only user data the bot stores**, it is volunteered rather than harvested, it holds nothing but an id and a `{name, surname, region}` per character, and `/iam forget` deletes a user's entry outright. Keep it that way: do not add display names, activity, or anything the user did not type in themselves.
 
   Do not add another store without a very good reason.
 - **Privileged intents: `MessageContent` and `GuildMembers` are enabled, for spam detection only.** They must be switched on in the Discord Developer Portal or login fails. Do not add further privileged intents, and do not use these two for anything beyond moderation.
@@ -40,8 +48,9 @@ Keep these boundaries — the tests rely on them for mocking:
 - Registration scope is driven by `GUILD_ID`: set means guild-scoped plus a wipe of the global set (duplicates otherwise), unset means global. The wipe must stay conditional on the guild registration having succeeded — clearing first would leave the application with no commands if the guild call fails.
 - Export `buildEmbed` (and any pure helper) so it can be tested without an interaction.
 - Always `deferReply()` first — Blizzard calls routinely exceed Discord's 3-second interaction window.
-- Handle `404` inside the command when a specific message helps the user (name the realm slug that was tried). Let every other error propagate; `handlers/interactionHandler.js` translates it.
-- Use `addRegionOption` / `resolveRegion` from `utils/commandOptions.js` so every command takes `region` identically.
+- Handle `404` inside the command when a specific message helps the user (name the slug that was tried). Let every other error propagate; `handlers/interactionHandler.js` translates it.
+- Use `addRegionOption` / `resolveRegion` from `utils/commandOptions.js` so every command takes `region` identically. There is no `game` option anywhere — this bot serves one flavour, so there is nothing to pick.
+- A character-taking command uses `resolveCharacterTarget` from `utils/commandOptions.js` — it turns whatever was typed (`Judgement-Judy`, `Judgement Judy`, or `character:Judgement surname:Judy`) into the `{name}-{surname}` slug Blizzard wants, or a user-facing `error` naming what is missing. Never build that slug by hand.
 
 ## Discord gotchas
 
@@ -52,54 +61,40 @@ Keep these boundaries — the tests rely on them for mocking:
 
 ## Blizzard API gotchas
 
-- Namespaces are mandatory: `profile-{region}` for characters, `dynamic-{region}` for realms and the token, `static-{region}` for items.
-- **One flavour has no realms at all.** Classic Forever addresses characters as `{name}-{surname}` with no realm segment, and has rulesets where every other flavour has realms. Read the "Classic Forever" section below before touching anything that takes a realm.
-- Namespaces also carry the game version: `dynamic-classic-us`, `profile-classicann-us`. Build them with `buildNamespace` from `config/`; never concatenate by hand.
-- **A 403 does not mean a namespace is absent.** An invalid namespace and an unauthorised one return an identical generic `403 Forbidden`, so a 403 proves nothing either way. `classicann` (TBC Anniversary) is undocumented in the API reference and was found only on Blizzard's API forum. If a realm seems missing, suspect a namespace you do not know about before concluding the data is unpublished.
-- **A 404 is different, and it is informative.** Measured 2026-11-06: an unrecognised namespace 403s (`zzqqxxnonsense`, `classic2x`, `classictbc`, `era`, `vanilla`, `hardcore`, `classic-forever`, and omitting the parameter), while an *accepted* namespace with no document at that path returns `404 BLZWEBAPI00000404` — the same thing `dynamic-us` plus a bogus realm slug returns. So a 404 is positive evidence the namespace exists. This is what identified `forever`.
-- **The 404 body splits it further.** A 404 with an EMPTY body means the route does not exist (`/data/wow/nonsense/index` under `dynamic-us`); a 404 carrying `BLZWEBAPI00000404` means the route and namespace are both real and there is simply no document there. Checking the body is sharper than checking the status.
-- **There is no discovery endpoint.** `/data/wow/`, `/data/wow/index`, `/data/` and `/` all 404, *including* under a namespace that definitely works, and there is no OpenAPI document under `us.api.blizzard.com` or `develop.battle.net`. "Which endpoints are live?" cannot be asked, only tested one known path at a time — which is why `utils/namespaceWatch/checks.js` is a hand-maintained list and must stay in step with the wrappers in `utils/blizzard/`.
-- **Never derive a realm slug when you can resolve one.** Use `resolveRealm` from `utils/blizzard/realms.js`, which matches against the live index — but reach for `resolveCharacterTarget`/`resolveRealmTarget` in `utils/commandOptions.js` from a command, since those also handle the realmless flavour. Blizzard deletes hyphens and apostrophes (`Azjol-Nerub` → `azjolnerub`) but keeps accents (`festung-der-stürme`), so the naive transformation is wrong for roughly a quarter of realms. `slugifyRealm` implements the verified rule and exists as the offline fallback.
-- Character names must be lowercased in paths — use `encodeCharacterName`.
-- **Endpoint wrappers take realm SLUGS, never names.** `slugifyRealm` is not idempotent: it deletes hyphens, so applying it to an existing slug turns `area-52` into `area52` and every request 404s. Resolve once with `resolveRealm`, then pass the slug down. A **null** slug is meaningful: it tells `characterPath` and `guildPath` to omit the realm segment entirely.
-- Equipment payloads omit `level.value` on Classic and Anniversary; only retail supplies item levels. Render it conditionally.
-- Search endpoints return **localized maps** (`{ en_US: "..." }`) while direct document fetches return plain strings. Run anything user-visible through `localized()`.
-- Realm status and population live on the **connected realm**, not the realm document.
-- Mythic+ ratings are RGB component objects, not integers; `ratingColor()` packs them.
-- Currency values are in copper. `formatGold()` converts.
+Everything below is Classic Forever's actual shape — `static-forever-{region}` /
+`dynamic-forever-{region}` / `profile-forever-{region}`, patch 1.60.1 — measured
+against the live API on 2026-11-06. There is no other flavour in this codebase
+to contrast it with any more.
 
-## Classic Forever (realmless flavour)
-
-Classic Forever (`game: forever`, namespaces `static-forever-{region}` / `dynamic-forever-{region}` / `profile-forever-{region}`) does not have realms. It is the only supported flavour that works this way, and it is why several realm-shaped helpers now take a null realm. All of the below was measured against the live API on 2026-11-06.
-
-- **A character is ONE path segment: `{name}-{surname}`, lowercased.** `/profile/wow/character/judgement-judy` → 200, with `realm: null`, a `surname` field, and a `ruleset` of `{ id, name }`. Build the slug with `characterSlug` from `utils/wow.js` and pass the realm slug as **null** — `characterPath` then omits the realm segment. Never interpolate a realm yourself; writing the string `"null"` into a path is a bug that already happened once, in `pvp.js`.
-- **A guild is one segment too.** `/data/wow/guild/circle-of-lore` → 200, and `/roster` under it works. Same rule: `guildPath(null, slug)`.
-- **Rulesets replace realms.** `/data/wow/ruleset/index` → 200 with four: `1` PvP, `2` Normal, `3` Roleplay, `15` Roleplay PvP, each carrying a `status` and an `auctions` link. `utils/blizzard/rulesets.js` caches and resolves them, deliberately shaped like `realms.js`. A ruleset is **not** part of a character's address — it hangs off the profile as a property, so you never need one to look a character up. `/realm` and `/realms` report them so those commands have something true to say.
-- **The index gives ids only.** Ruleset index entries are `{ id, key.href }` — no name, no status — so listing them costs one request per ruleset. That is why the assembled list is what gets cached, not the index.
-- **The auction index needs a trailing slash.** `/data/wow/ruleset/{id}/auctions/` works; without the slash it 404s. Nothing else in this API behaves that way, so leave it alone.
-- **There are no realms, and there never will be.** `/data/wow/realm/index` and `/data/wow/connected-realm/index` 404, while `/data/wow/search/realm` returns **200 with `pageCount: 0`**. The realm collection is live and permanently empty, not unpublished — do not write anything that waits for it to fill.
-- **Characters appear only from level 10, and only after logging out.** So a 404 on a character you believe exists is usually one of those two, not a broken namespace. In a 33-member roster, 22 answered `pvp-summary` and the 11 that did not were all below level 10.
+- Namespaces are mandatory on every call: `profile-forever-{region}` for characters and guilds, `dynamic-forever-{region}` for rulesets, `static-forever-{region}` for items. Build them with `buildNamespace` from `config/`, which always inserts the `forever` infix — never concatenate by hand.
+- **There are no realms, and there never will be.** `/data/wow/realm/index` and `/data/wow/connected-realm/index` 404 permanently; `/data/wow/search/realm` answers **200 with `pageCount: 0`** — the collection is live and empty, not unpublished. Do not write anything that waits for it to fill.
+- **A character is ONE path segment: `{name}-{surname}`, lowercased.** `/profile/wow/character/judgement-judy` → 200, with `realm: null`, a `surname` field, and a `ruleset` of `{ id, name }` in its place. Build the slug with `characterSlug` from `utils/wow.js`; `resolveCharacterTarget` in `utils/commandOptions.js` does this for a command from whatever was typed. Never interpolate a realm into a character path — writing the literal string `"null"` into a URL is a bug that already happened once, in what is now `utils/blizzard/profile.js`.
+- **A guild is one segment too.** `/data/wow/guild/circle-of-lore` → 200, and `/roster` under it works. There is no guild index, so a bad name cannot produce suggestions — only the slug that was tried.
+- **Rulesets are what this flavour has instead of realms.** `/data/wow/ruleset/index` → 200 with four: `1` PvP, `2` Normal, `3` Roleplay, `15` Roleplay PvP, each carrying a `status` and an `auctions` link. `utils/blizzard/rulesets.js` caches and resolves them. A ruleset is **not** part of a character's address — it hangs off the profile as a property, so you never need one to look a character up. `/realm` and `/realms` report them because that is the whole of what this flavour has to say in place of realm status.
+- **The ruleset index gives ids only.** Entries are `{ id, key.href }` — no name, no status — so listing them with names costs one request per ruleset. That is why the assembled list is what gets cached, not the index.
+- **The ruleset auction index needs a trailing slash.** `/data/wow/ruleset/{id}/auctions/` works; without the slash it 404s. Nothing else in this API behaves that way, so leave it alone.
+- **Characters appear only from level 10, and only after logging out.** A 404 on a character you believe exists is usually one of those two, not a broken namespace. In a 33-member roster, 22 answered `pvp-summary` and the 11 that did not were all below level 10.
+- **A 403 and a 404 do NOT mean the same thing.** `403 BLZWEBAPI00000403` means the namespace itself is not recognised or not ours to read — this is how `classic-forever` was ruled out as the wrong namespace name (the real one is `forever`). `404 BLZWEBAPI00000404` means the namespace IS accepted and that specific path simply has no document — a bogus character or guild name 404s this way under a perfectly healthy namespace. A 404 with an **empty body**, by contrast, means the *route itself* does not exist (`/data/wow/nonsense/index`). Checking the body is sharper than checking the status alone.
+- **There is no discovery endpoint.** `/data/wow/`, `/data/wow/index`, `/data/` and `/` all 404, including under a namespace that definitely works, and there is no OpenAPI document under `us.api.blizzard.com` or `develop.battle.net`. "Which endpoints are live?" cannot be asked, only tested one known path at a time — which is why `utils/namespaceWatch/checks.js` is a hand-maintained list and must stay in step with the wrappers in `utils/blizzard/`.
 - **All four regions serve it**, each with its own region id: 91 US, 93 EU, 92 KR, 94 TW. Characters are region-scoped — `judgement-judy` is EU and 404s in US.
 - **`active_spec` and `active_title` are always null**, and `titles` returns `{}`. Render them conditionally; `/character` already does.
-- **There is no armory page.** `armoryUrl` returns null when given no realm, because the site's character route has no realm-less shape. Callers must treat null as "no link" — `setURL(null)` throws.
-- **Wowhead has no Forever database.** `WOWHEAD_PATH.forever` points at `classic/`, which is correct: Forever is patch 1.60.1.
+- **There is no armory page.** The site's character route has no realm-less shape, so no URL exists to link to. `/character`'s embed simply has no `setURL` call — do not try to construct one.
+- **Wowhead has no separate Forever database.** `WOWHEAD_PATH` in `utils/wow.js` is hardcoded to `classic/`, which is correct: Forever is patch 1.60.1, the vanilla era.
+- Search endpoints return **localized maps** (`{ en_US: "..." }`) while direct document fetches return plain strings. Run anything user-visible through `localized()`.
+- Currency values are in copper. `formatGold()` converts.
 
-### What cannot work, and why
+### What cannot work, and why — the three deleted commands
 
-These are properties of the game, not gaps Blizzard will fill. `UNSUPPORTED` in `config/index.js` holds the user-facing reason for each, and the commands reply with it instead of failing:
+`/token`, `/arena` and `/mythicplus` do not exist in this codebase. They were
+removed outright rather than kept and made to refuse gracefully, because their
+entire reason for existing depends on something 1.60.1 does not have:
 
-- **`/token`** — no WoW Token in vanilla; `/data/wow/token/index` 404s.
-- **`/arena`** — arena arrived in The Burning Crusade. `pvp-season/index` and `pvp-region/index` 404; `pvp-summary` carries only `honorable_kills` and `pvp_rank`, the vanilla honour system.
-- **`/mythicplus`** — keystones arrived in Legion. The endpoint 200s but returns only `current_period`, with no rating and no runs. The command is unaffected in practice because it hardcodes `game: 'retail'` and never switches version.
-- **`hunter-pets`** 404s, and auction item data is sparse.
+- **WoW Token** — vanilla had none; `/data/wow/token/index` 404s.
+- **Arena** — arrived in The Burning Crusade. `pvp-season/index` and `pvp-region/index` 404; `pvp-summary` carries only `honorable_kills` and `pvp_rank`, the vanilla honour system (and that part DOES work — it powers the weekly report's kill tracking, via `getCharacterPvpSummary` in `utils/blizzard/profile.js`).
+- **Mythic Keystones** — arrived in Legion. The endpoint 200s but returns only `current_period`, with no rating and no runs — nothing a command could show.
 
-### Consequences for shared code
-
-- **`addRealmOption` is never `setRequired(true)`.** One slash-command definition is registered for every flavour, so marking realm required would make Discord demand one from the flavour that cannot use it. The requirement moved to `resolveCharacterTarget`, which can see the chosen game. The cost is that a missing realm is reported when the command runs rather than as you type.
-- **Use `resolveCharacterTarget` and `resolveRealmTarget`** from `utils/commandOptions.js` rather than calling `resolveRealm` in a command. They return either a ready-to-use target or a user-facing `error`, and they are the single place that knows two addressing shapes exist.
-- **`characterKey` and `memberKey` take a surname.** Without it two Forever characters sharing a first name collapse into one entry and their report lines merge. Omitting the surname reproduces the original name-only key, so links and snapshots written before Forever existed still match.
-- **A realmless link stores no realm.** `normalizeCharacter` refuses to fall back to `BLIZZARD_REALM` for these — that would key a character under a realm it is not on — and requires a surname instead.
-- **A configured home realm is meaningless here.** `/realm` reads its option directly rather than through `resolveRealmName`, because applying a realm name as a ruleset name could only ever fail.
+Do not re-add any of the three expecting a reasoned refusal to be enough; the
+decision made here was to remove the feature, not soften its failure.
 
 ## Namespace watch
 
@@ -121,22 +116,20 @@ Polls the `forever` namespace and posts to `#bot-activity-log` when an endpoint 
 - **Never act without `enforcement.preflight()`.** It checks bot permissions, the server owner, and role hierarchy. A blocked action still raises an alert; silent failure is the worst outcome.
 - New scam patterns need a negative test proving ordinary guild chat does not match. `/spam test` exists for tuning them safely.
 
-## Arena, guild, and enchant audit
+## Guild and enchant audit
 
-- **Never hardcode a PvP season.** `getCurrentSeasonId` reads it from the API; it is 3 today and will not stay that way.
-- **Ladders are cached for 10 minutes** in `utils/blizzard/pvp.js`. One bracket is ~5,000 entries and a rank lookup scans all of them, so do not fetch per bracket per invocation without the cache.
-- **Only `2v2`, `3v3` and `5v5` exist in TBC.** The API also advertises `blitz-overall`, `shuffle-overall` and `rbg`; those are retail-only and empty.
-- **The enchant audit must know which slots TBC can enchant.** Neck, waist, trinkets, shirt and tabard cannot be, and a relic (idol/libram/totem) in the ranged slot cannot either. Flagging them produces permanent false positives and destroys trust in the command. Rings are enchanter-only, so they are reported separately rather than as failures.
 - **Sockets are not auditable.** `sockets` is absent from equipped items and null on the item document, so an empty socket is indistinguishable from no socket. Do not add "missing gem" checks; there is no data for them.
-- **Guilds have no index endpoint.** Unlike realms, the slug must be derived, so a bad guild name cannot produce suggestions. Report the slug that was tried.
+- **Guilds have no index endpoint.** The slug must be derived, so a bad guild name cannot produce suggestions. Report the slug that was tried.
+- **`utils/enchants.js`'s slot list was written for TBC and has not been re-verified against 1.60.1.** Its own comments say "Always enchantable in TBC" for `ENCHANTABLE_SLOTS`, which includes `SHOULDER` — shoulder enchants are a later addition in WoW's real history, and nothing in this retrofit confirmed whether Forever's 1.60.1 ruleset has them. If `/audit` is ever seen flagging a shoulder slot as "missing" on a character nobody enchants there, this is the first place to check — not a bug in the audit logic itself. Rings are enchanter-only regardless of era, so they are reported separately rather than as failures.
 
 ## Weekly reports
 
+- **A tracked guild is name and region only — there is no realm.** `guildKey` in `utils/reports/config.js` identifies a guild by those two alone; two same-named guilds in different regions stay apart, but there is no third axis to disambiguate further. Any `reports.json` written before this retrofit may carry old `realm`/`game` fields — `normalizeGuild` silently ignores them, which re-keys a pre-existing tracked guild under the new, shorter identity. That is a one-time, harmless migration, not a bug.
 - **Snapshots are the feature.** Every delta in a report exists because the previous week's numbers were kept. Nothing in the Blizzard API is per-week. If a change makes snapshots optional, it has removed the point of the command.
 - **Previewing must never persist.** `/report now` builds a report without saving a snapshot, because saving consumes the baseline the next report subtracts from — preview on Sunday with persistence on and Monday's scheduled report covers one day instead of seven. Only the scheduled run and `/report post` save, and both reset the week deliberately.
-- **A 404 from `pvp-summary` is normal, not a failure.** Measured against a real 240-member guild, 23 members had no PvP summary: bank alts parked at level 1, plus characters whose profile Blizzard has not published. `collectKills` counts those separately from real errors. Reporting them as failures would put a warning on every report and teach people to ignore it.
-- **Guild rosters carry a class ID, not a class name.** On Anniversary, `playable_class.name` is absent from roster entries — only `id` is there — so anything printing a class must resolve ids through `getPlayableClassIndex`. (The class breakdown in `/guild` predates this and is empty on Anniversary for exactly this reason.)
-- **Ladders are scanned per bracket, never per character.** There is no per-character ladder endpoint, and one bracket is ~5,000 entries, so three cached list scans beat hundreds of requests for a 240-member guild.
+- **A member's roster entry has a surname, and `memberKey`/`characterKey` key on BOTH halves.** Characters have no realm, so without the surname two roster members who happen to share a first name would collapse into one snapshot entry, with kills and levels attributed to whichever was read last.
+- **A 404 from `pvp-summary` is normal, not a failure.** It is what a character below level 10, or one that has never logged out, returns — `collectKills` counts those separately from real errors (a 5xx, a timeout). Reporting them as failures would put a warning on every report and teach people to ignore it.
+- **Guild rosters carry a class ID, not a class name.** `playable_class.name` is absent from roster entries — only `id` is there — so anything printing a class resolves ids through `getPlayableClassIndex` first.
 - **The schedule is a slot, not a timer.** Each tick asks "has the most recent slot passed without a post since?". That is what makes an offline bot report late rather than never, and a restarting bot report once rather than every five minutes. `frequency` picks the cycle length; `dayOfWeek` is read only when it is `weekly`.
 - **Clearing the channel only ever deletes the bot's own messages.** "Clear the channel" means "show only the current report", and a report channel is dedicated, so in practice that is everything in it — but scoping it this way means a misconfigured channel costs nobody their conversation. `bulkDelete` cannot touch anything over fourteen days old, so older messages are deleted singly.
 - **The report carries counts, the button carries names.** Two hundred names would bury the rest of the report, so the breakdown goes out as a DM on request. Components belong to a message rather than an embed, so when several guilds share a channel each gets its own button.
@@ -145,7 +138,7 @@ Polls the `forever` namespace and posts to `#bot-activity-log` when an endpoint 
 - **"Not on Discord" is three states, not one** (`utils/reports/membership.js`): linked and present, linked but departed, and never linked. They need different follow-up, and `fetchPresentUserIds` returns null rather than an empty set on failure — an empty set would report the entire guild as having left.
 - **Times are UTC, and every surface says so.** A timezone library is a dependency this project does not take, and reading the host's local zone would silently shift everyone's report when the box moves.
 - **Posting is not an interaction, so `GUILD_ID` has to be checked by hand.** Nothing else stops a second instance sharing the token from double-posting; `publishReports` runs the channel's guild through `isGuildInScope` before sending.
-- **The level cap is derived from the roster, never hardcoded.** TBC is 70 today and Anniversary realms advance on Blizzard's schedule.
+- **The level cap is derived from the roster, never hardcoded.** Whatever the highest level actually present is, that is the cap shown — no constant to update if Blizzard ever raises it.
 - **Mentions are an upgrade, never a requirement.** Reports are built from guild rosters and read correctly with `links.json` empty; a link only turns a character name into a mention.
 
 ## Onboarding auto-kick

@@ -1,23 +1,14 @@
 // utils/blizzard/gameData.js
-// Game Data API endpoints. Realm/token data is `dynamic-{region}`; items are `static-{region}`.
+// Game Data API endpoints. Rulesets are `dynamic-{region}`; items are `static-{region}`.
 
 const { request } = require('./client');
 const { readConfig } = require('../../config');
 
-/** Current WoW Token price, in copper, plus the time it was last updated. */
-function getWowTokenPrice(options = {}) {
-  return request('/data/wow/token/index', { ...options, namespace: 'dynamic' });
-}
-
-/** Every realm in the region, used to resolve and suggest realm names. */
-function getRealmIndex(options = {}) {
-  return request('/data/wow/realm/index', { ...options, namespace: 'dynamic' });
-}
-
 /**
  * Every ruleset id in the region. Rulesets are Classic Forever's replacement for
- * realms, and this is the only index it publishes — `/data/wow/realm/index` 404s
- * there permanently.
+ * realms — `/data/wow/realm/index` 404s permanently, and `/data/wow/search/realm`
+ * answers 200 with zero rows, so the realm collection is not unpublished, it is
+ * structurally empty.
  *
  * The entries carry ONLY `{ id, key.href }`: no name, no status. Listing them
  * with names therefore costs one request per ruleset, which is why
@@ -43,28 +34,10 @@ function getRulesetAuctionIndex(rulesetId, options = {}) {
 }
 
 /**
- * A single realm: type, timezone, category, and its connected-realm reference.
- * Takes an already-resolved slug — see the note in profile.js on why this must
- * not slugify again.
- */
-function getRealm(realmSlug, options = {}) {
-  return request(`/data/wow/realm/${realmSlug}`, { ...options, namespace: 'dynamic' });
-}
-
-/** Connected realm: up/down status, population, queue flag, and member realms. */
-function getConnectedRealm(connectedRealmId, options = {}) {
-  return request(`/data/wow/connected-realm/${connectedRealmId}`, {
-    ...options,
-    namespace: 'dynamic'
-  });
-}
-
-/**
  * Playable classes for the game version.
  *
- * Needed because guild rosters identify a member's class by id only — on
- * Anniversary `playable_class.name` is absent from roster entries, so anything
- * that wants to print a class has to resolve ids itself.
+ * Needed because guild rosters identify a member's class by id only, with no
+ * name alongside it — resolving the name is on whatever wants to print one.
  */
 function getPlayableClassIndex(options = {}) {
   return request('/data/wow/playable-class/index', { ...options, namespace: 'static' });
@@ -102,15 +75,11 @@ function searchItems(name, options = {}) {
 }
 
 module.exports = {
-  getConnectedRealm,
   getItem,
   getItemMedia,
   getPlayableClassIndex,
-  getRealm,
-  getRealmIndex,
   getRuleset,
   getRulesetAuctionIndex,
   getRulesetIndex,
-  getWowTokenPrice,
   searchItems
 };

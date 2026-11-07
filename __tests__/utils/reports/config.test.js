@@ -42,7 +42,8 @@ function written() {
   return JSON.parse(calls[calls.length - 1][1]);
 }
 
-const APEX = { name: 'Apex', realm: 'Nightslayer', region: 'us', game: 'anniversary' };
+// Guilds have no realm: region plus name is the whole identity.
+const APEX = { name: 'Apex', region: 'us' };
 
 describe('normalizeConfig', () => {
   it('fills in every default for an empty object', () => {
@@ -74,13 +75,13 @@ describe('normalizeConfig', () => {
   });
 
   it('drops guilds that have no name', () => {
-    expect(normalizeConfig({ guilds: [{ realm: 'Nightslayer' }] }).guilds).toEqual([]);
+    expect(normalizeConfig({ guilds: [{ region: 'us' }] }).guilds).toEqual([]);
   });
 
   it('keeps at most the tracked-guild ceiling', () => {
     const many = Array.from({ length: MAX_TRACKED_GUILDS + 5 }, (_, i) => ({
       name: `Guild${i}`,
-      realm: 'Nightslayer'
+      region: 'us'
     }));
 
     expect(normalizeConfig({ guilds: many }).guilds).toHaveLength(MAX_TRACKED_GUILDS);
@@ -89,19 +90,19 @@ describe('normalizeConfig', () => {
   it('treats guilds differing only by case and spacing as one', () => {
     const config = normalizeConfig({
       guilds: [
-        { name: 'Apex', realm: 'Nightslayer' },
-        { name: ' apex ', realm: 'nightslayer' }
+        { name: 'Apex', region: 'us' },
+        { name: ' apex ', region: 'us' }
       ]
     });
 
     expect(config.guilds).toHaveLength(1);
   });
 
-  it('keeps same-named guilds on different realms apart', () => {
+  it('keeps same-named guilds in different regions apart', () => {
     const config = normalizeConfig({
       guilds: [
-        { name: 'Apex', realm: 'Nightslayer' },
-        { name: 'Apex', realm: 'Dreamscythe' }
+        { name: 'Apex', region: 'us' },
+        { name: 'Apex', region: 'eu' }
       ]
     });
 
@@ -110,34 +111,29 @@ describe('normalizeConfig', () => {
 });
 
 describe('normalizeGuild', () => {
-  it('falls back to the configured home realm', () => {
-    // jest.setup.js pins BLIZZARD_REALM to Testrealm.
-    expect(normalizeGuild({ name: 'Apex' }).realm).toBe('Testrealm');
-  });
-
-  it('falls back to the configured region and game', () => {
-    expect(normalizeGuild({ name: 'Apex' })).toMatchObject({ region: 'us', game: 'retail' });
+  it('falls back to the configured region', () => {
+    expect(normalizeGuild({ name: 'Apex' })).toMatchObject({ region: 'us' });
   });
 
   it('rejects an unknown region rather than sending it to Blizzard', () => {
     expect(normalizeGuild({ name: 'Apex', region: 'mars' }).region).toBe('us');
   });
 
-  it('returns null when there is nothing usable', () => {
+  it('returns null when there is no name', () => {
     expect(normalizeGuild({})).toBeNull();
     expect(normalizeGuild(null)).toBeNull();
   });
 });
 
 describe('guildKey', () => {
-  it('folds case, punctuation, and accents the way realm matching does', () => {
-    expect(guildKey({ name: "Knights' Watch", realm: 'Azjol-Nerub', region: 'us', game: 'retail' })).toBe(
-      guildKey({ name: 'knights watch', realm: 'azjolnerub', region: 'US', game: 'retail' })
+  it('folds case, punctuation, and accents the way character matching does', () => {
+    expect(guildKey({ name: "Knights' Watch", region: 'us' })).toBe(
+      guildKey({ name: 'knights watch', region: 'US' })
     );
   });
 
-  it('separates the same guild name on different game versions', () => {
-    expect(guildKey({ ...APEX, game: 'retail' })).not.toBe(guildKey({ ...APEX, game: 'anniversary' }));
+  it('keeps the same guild name apart across regions', () => {
+    expect(guildKey({ ...APEX, region: 'us' })).not.toBe(guildKey({ ...APEX, region: 'eu' }));
   });
 });
 
@@ -203,7 +199,7 @@ describe('trackGuild', () => {
     fileContains({
       guilds: Array.from({ length: MAX_TRACKED_GUILDS }, (_, i) => ({
         name: `Guild${i}`,
-        realm: 'Nightslayer'
+        region: 'us'
       }))
     });
 
@@ -212,7 +208,7 @@ describe('trackGuild', () => {
 
   it('refuses an entry with no name', () => {
     fileMissing();
-    expect(trackGuild({ realm: 'Nightslayer' })).toMatchObject({ added: false, reason: 'incomplete' });
+    expect(trackGuild({ region: 'us' })).toMatchObject({ added: false, reason: 'incomplete' });
   });
 });
 
@@ -226,14 +222,14 @@ describe('untrackGuild', () => {
     expect(written().guilds).toEqual([]);
   });
 
-  it('removes only the named realm when two guilds share a name', () => {
+  it('removes only the named region when two guilds share a name', () => {
     fileContains({
-      guilds: [APEX, { ...APEX, realm: 'Dreamscythe' }]
+      guilds: [APEX, { ...APEX, region: 'eu' }]
     });
 
-    untrackGuild({ name: 'Apex', realm: 'Dreamscythe' });
+    untrackGuild({ name: 'Apex', region: 'eu' });
 
-    expect(written().guilds).toEqual([expect.objectContaining({ realm: 'Nightslayer' })]);
+    expect(written().guilds).toEqual([expect.objectContaining({ region: 'us' })]);
   });
 
   it('reports a miss rather than silently writing the file again', () => {

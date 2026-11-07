@@ -4,40 +4,28 @@ jest.mock('../../utils/blizzard/profile', () => ({
   getCharacterEquipment: jest.fn()
 }));
 
-// The realm resolver reads the live realm index; stub it so tests stay offline.
-jest.mock('../../utils/blizzard/realms', () => ({
-  findRealmGames: jest.fn(async () => []),
-  resolveRealm: jest.fn(async query => ({
-    slug: String(query).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ +/g, '-'),
-    name: query,
-    resolved: true
-  }))
-}));
-
 const {
   getCharacterProfile,
   getCharacterMedia,
   getCharacterEquipment
 } = require('../../utils/blizzard/profile');
-const { resolveRealm, findRealmGames } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/character');
 const { createInteraction, field, replyEmbed, replyPayload } = require('../helpers/interaction');
 
 const PROFILE = {
-  name: 'Thrall',
-  level: 80,
-  race: { name: 'Orc' },
-  character_class: { name: 'Shaman' },
-  active_spec: { name: 'Enhancement' },
-  faction: { name: 'Horde' },
-  guild: { name: 'Earthen Ring' },
-  realm: { name: 'Area 52', slug: 'area-52' },
-  equipped_item_level: 623,
-  average_item_level: 620,
-  achievement_points: 24500,
-  last_login_timestamp: 1700000000000,
-  active_title: { display_string: '{name} the Earth-Warder' }
+  name: 'Judgement',
+  surname: 'Judy',
+  level: 18,
+  race: { name: 'Human' },
+  character_class: { name: 'Paladin' },
+  faction: { name: 'Alliance' },
+  guild: { name: 'Circle of Lore' },
+  ruleset: { id: 2, name: 'Normal' },
+  equipped_item_level: 8,
+  average_item_level: 8,
+  achievement_points: 0,
+  last_login_timestamp: 1700000000000
 };
 
 const MEDIA = {
@@ -50,17 +38,17 @@ const MEDIA = {
 const EQUIPMENT = {
   equipped_items: [
     { slot: { type: 'HEAD', name: 'Head' }, name: 'Kodohide Helm', item: { id: 31988 } },
-    { slot: { type: 'CHEST', name: 'Chest' }, name: 'Kodohide Tunic', item: { id: 33694 }, level: { value: 141 } },
+    { slot: { type: 'CHEST', name: 'Chest' }, name: 'Kodohide Tunic', item: { id: 33694 }, level: { value: 8 } },
     { slot: { type: 'SHIRT', name: 'Shirt' }, name: 'Orange Martial Shirt', item: { id: 2575 } },
     { slot: { type: 'TABARD', name: 'Tabard' }, name: 'Tabard of the Protector', item: { id: 31404 } },
-    { slot: { type: 'MAIN_HAND', name: 'Main Hand' }, name: 'Ethereum Life-Staff', item: { id: 29981 } }
+    { slot: { type: 'MAIN_HAND', name: 'Main Hand' }, name: 'Rusty Sword', item: { id: 29981 } }
   ]
 };
 
 function interaction(overrides = {}) {
   return createInteraction({
     commandName: 'character',
-    options: { character: 'Thrall', realm: 'Area 52', ...overrides }
+    options: { character: 'Judgement-Judy', ...overrides }
   });
 }
 
@@ -70,12 +58,6 @@ beforeEach(() => {
   getCharacterProfile.mockResolvedValue(PROFILE);
   getCharacterMedia.mockResolvedValue(MEDIA);
   getCharacterEquipment.mockResolvedValue(EQUIPMENT);
-  resolveRealm.mockImplementation(async query => ({
-    slug: String(query).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ +/g, '-'),
-    name: query,
-    resolved: true
-  }));
-  findRealmGames.mockResolvedValue([]);
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -85,14 +67,9 @@ describe('/character definition', () => {
     const json = command.data.toJSON();
 
     expect(json.name).toBe('character');
-    // `realm` is never required: one definition serves every flavour, and
-    // Classic Forever has no realms. `surname` is how a Forever character is
-    // identified instead. Both are validated at run time, not by Discord.
     expect(json.options.map(option => [option.name, option.required])).toEqual([
       ['character', true],
-      ['realm', false],
       ['surname', false],
-      ['game', false],
       ['region', false]
     ]);
   });
@@ -107,53 +84,47 @@ describe('/character execute', () => {
     expect(target.deferReply).toHaveBeenCalled();
 
     const embed = replyEmbed(target);
-    expect(embed.title).toBe('Thrall — Area 52 (US)');
-    expect(embed.url).toContain('/character/us/area-52/thrall');
-    expect(field(embed, 'Level').value).toBe('80');
-    expect(field(embed, 'Class').value).toBe('Enhancement Shaman');
-    expect(field(embed, 'Item Level').value).toBe('623 equipped / 620 avg');
-    expect(field(embed, 'Achievements').value).toBe('24,500');
-    expect(field(embed, 'Guild').value).toBe('<Earthen Ring>');
-    expect(field(embed, 'Title').value).toBe('Thrall the Earth-Warder');
+    expect(embed.title).toBe('Judgement Judy — Normal (US)');
+    expect(embed.url).toBeUndefined();
+    expect(field(embed, 'Level').value).toBe('18');
+    expect(field(embed, 'Class').value).toBe('Paladin');
+    expect(field(embed, 'Item Level').value).toBe('8 equipped / 8 avg');
+    expect(field(embed, 'Achievements').value).toBe('0');
+    expect(field(embed, 'Guild').value).toBe('<Circle of Lore>');
     expect(field(embed, 'Last Login').value).toBe('<t:1700000000:R>');
     expect(embed.thumbnail.url).toBe('https://render/avatar.jpg');
     expect(embed.image.url).toBe('https://render/main.png');
   });
 
   it('tints the embed with the class colour', () => {
-    const embed = command.buildEmbed({
-      profile: PROFILE,
-      media: null,
-      region: 'us',
-      realmSlug: 'area-52',
-      characterName: 'Thrall',
-      scopeLabel: 'US'
-    });
+    const embed = command.buildEmbed({ profile: PROFILE, media: null, scopeLabel: 'US' });
+    expect(embed.toJSON().color).toBe(0xf48cba); // Paladin pink
+  });
 
-    expect(embed.toJSON().color).toBe(0x0070dd); // Shaman blue
+  it('accepts the character and surname as separate options', async () => {
+    const target = interaction({ character: 'Judgement', surname: 'Judy' });
+    await command.execute(target);
+
+    expect(getCharacterProfile).toHaveBeenCalledWith('judgement-judy', { region: 'us' });
   });
 
   it('passes the chosen region through to the API', async () => {
     await command.execute(interaction({ region: 'eu' }));
 
-    expect(getCharacterProfile).toHaveBeenCalledWith(
-      'area-52',
-      'Thrall',
-      expect.objectContaining({ region: 'eu', game: 'retail' })
-    );
+    expect(getCharacterProfile).toHaveBeenCalledWith('judgement-judy', { region: 'eu' });
   });
 
   it('lists equipped items in paperdoll order, linked to Wowhead', async () => {
-    const target = interaction({ game: 'anniversary' });
+    const target = interaction();
 
     await command.execute(target);
 
     const gear = field(replyEmbed(target), 'Equipment').value;
     const lines = gear.split('\n');
 
-    expect(lines[0]).toBe('**Head** [Kodohide Helm](https://www.wowhead.com/tbc/item=31988)');
-    // Item level is appended only when the API supplies one (retail does, TBC does not).
-    expect(lines[1]).toBe('**Chest** [Kodohide Tunic](https://www.wowhead.com/tbc/item=33694) · 141');
+    expect(lines[0]).toBe('**Head** [Kodohide Helm](https://www.wowhead.com/classic/item=31988)');
+    // Item level is appended only when the API supplies one.
+    expect(lines[1]).toBe('**Chest** [Kodohide Tunic](https://www.wowhead.com/classic/item=33694) · 8');
     expect(lines[2]).toContain('Main Hand');
   });
 
@@ -176,7 +147,7 @@ describe('/character execute', () => {
       }))
     };
 
-    const fields = command.equipmentFields(many, 'retail');
+    const fields = command.equipmentFields(many);
 
     expect(fields.length).toBeGreaterThan(1);
     fields.forEach(f => expect(f.value.length).toBeLessThanOrEqual(1024));
@@ -196,7 +167,7 @@ describe('/character execute', () => {
     await command.execute(target);
 
     const embed = replyEmbed(target);
-    expect(embed.title).toContain('Thrall');
+    expect(embed.title).toContain('Judgement Judy');
     expect(field(embed, 'Equipment')).toBeUndefined();
   });
 
@@ -207,45 +178,28 @@ describe('/character execute', () => {
     await command.execute(target);
 
     const embed = replyEmbed(target);
-    expect(embed.title).toContain('Thrall');
+    expect(embed.title).toContain('Judgement Judy');
     expect(embed.thumbnail).toBeUndefined();
   });
 
-  it('explains a missing character and names the slug it tried', async () => {
+  it('asks for a surname instead of a bare name', async () => {
+    const target = interaction({ character: 'Judgement' });
+
+    await command.execute(target);
+
+    expect(replyPayload(target)).toContain('surname');
+    expect(getCharacterProfile).not.toHaveBeenCalled();
+  });
+
+  it('explains a missing character', async () => {
     getCharacterProfile.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
-    const target = interaction({ character: 'Nobody', realm: "Mal'Ganis" });
+    const target = interaction({ character: 'Nobody-Smith' });
 
     await command.execute(target);
 
     const payload = replyPayload(target);
-    expect(payload).toContain('Nobody');
-    expect(payload).toContain('malganis');
+    expect(payload).toContain('Nobody Smith');
     expect(getCharacterMedia).not.toHaveBeenCalled();
-  });
-
-  it('points at the right game version when the realm is in another one', async () => {
-    // The commonest mistake: correct realm, wrong game version.
-    resolveRealm.mockResolvedValue({ slug: 'nightslayer', name: 'Nightslayer', resolved: false });
-    getCharacterProfile.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
-    findRealmGames.mockResolvedValue([
-      { game: 'anniversary', label: 'TBC Anniversary', realm: { slug: 'nightslayer' } }
-    ]);
-
-    const target = interaction({ character: 'Mindbugger', realm: 'Nightslayer' });
-    await command.execute(target);
-
-    const payload = replyPayload(target);
-    expect(payload).toContain('is not a US realm');
-    expect(payload).toContain('game:TBC Anniversary');
-    expect(payload).toContain('Mindbugger');
-  });
-
-  it('does not suggest another version when the realm resolved fine', async () => {
-    getCharacterProfile.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
-
-    await command.execute(interaction({ character: 'Nobody' }));
-
-    expect(findRealmGames).not.toHaveBeenCalled();
   });
 
   it('rethrows non-404 failures for the interaction handler', async () => {
@@ -255,20 +209,11 @@ describe('/character execute', () => {
   });
 
   it('copes with a sparse profile payload', () => {
-    const embed = command
-      .buildEmbed({
-        profile: { name: 'Nub', realm: {} },
-        media: null,
-        region: 'us',
-        realmSlug: 'area-52',
-        characterName: 'Nub'
-      })
-      .toJSON();
+    const embed = command.buildEmbed({ profile: { name: 'Nub', surname: 'One' }, media: null, scopeLabel: 'US' }).toJSON();
 
     expect(field(embed, 'Level').value).toBe('—');
     expect(field(embed, 'Race').value).toBe('—');
     expect(field(embed, 'Guild')).toBeUndefined();
-    expect(field(embed, 'Title')).toBeUndefined();
     expect(field(embed, 'Last Login')).toBeUndefined();
   });
 });

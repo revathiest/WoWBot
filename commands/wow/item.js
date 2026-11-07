@@ -4,7 +4,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getItem, getItemMedia, searchItems } = require('../../utils/blizzard/gameData');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
+const { addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { readConfig } = require('../../config');
 const { formatGold, localized, mediaAsset, qualityColor, wowheadItemUrl } = require('../../utils/wow');
 
@@ -20,21 +20,20 @@ const data = new SlashCommandBuilder()
       .setRequired(true)
   );
 
-addGameOption(data);
 addRegionOption(data);
 
 function isItemId(query) {
   return /^\d+$/.test(query.trim());
 }
 
-function buildEmbed({ item, iconUrl, locale, game = 'retail' }) {
+function buildEmbed({ item, iconUrl, locale }) {
   const quality = localized(item.quality?.name, locale);
   const name = localized(item.name, locale) ?? 'Unknown item';
 
   const embed = new EmbedBuilder()
     .setColor(qualityColor(item.quality?.type ?? quality))
     .setTitle(name)
-    .setURL(wowheadItemUrl(item.id, game))
+    .setURL(wowheadItemUrl(item.id))
     .addFields(
       { name: 'Item ID', value: String(item.id), inline: true },
       { name: 'Quality', value: quality ?? '—', inline: true },
@@ -70,7 +69,7 @@ function buildEmbed({ item, iconUrl, locale, game = 'retail' }) {
 /** Icons are a separate document; a failure there should not lose the item itself. */
 async function loadIcon(itemId, scope) {
   try {
-    const media = await getItemMedia(itemId, { region: scope.region, game: scope.game });
+    const media = await getItemMedia(itemId, { region: scope.region });
     return mediaAsset(media, 'icon');
   } catch (err) {
     console.warn(`Could not load media for item ${itemId}: ${err.message}`);
@@ -79,10 +78,10 @@ async function loadIcon(itemId, scope) {
 }
 
 async function replyWithItem(interaction, itemId, scope, locale) {
-  const item = await getItem(itemId, { region: scope.region, game: scope.game });
+  const item = await getItem(itemId, { region: scope.region });
   const iconUrl = await loadIcon(item.id, scope);
 
-  await interaction.editReply({ embeds: [buildEmbed({ item, iconUrl, locale, game: scope.game })] });
+  await interaction.editReply({ embeds: [buildEmbed({ item, iconUrl, locale })] });
 }
 
 async function execute(interaction) {
@@ -105,7 +104,7 @@ async function execute(interaction) {
     return;
   }
 
-  const search = await searchItems(query, { region: scope.region, game: scope.game, locale });
+  const search = await searchItems(query, { region: scope.region, locale });
   const results = search.results ?? [];
 
   if (results.length === 0) {

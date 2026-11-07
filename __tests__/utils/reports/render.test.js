@@ -9,7 +9,6 @@ const {
   formatChange,
   guildLabel,
   killLines,
-  ladderLines,
   levelLines,
   listField,
   membershipLines,
@@ -17,7 +16,7 @@ const {
   rankLines
 } = require('../../../utils/reports/render');
 
-const GUILD = { name: 'Apex', realm: 'Nightslayer', realmSlug: 'nightslayer', region: 'us', seasonId: 3 };
+const GUILD = { name: 'Circle of Lore', region: 'eu' };
 
 function snapshot(members, capturedAt = 1_700_000_000_000) {
   return buildSnapshot({ guild: GUILD, capturedAt, members });
@@ -28,16 +27,16 @@ function field(embed, namePrefix) {
   return (embed.toJSON().fields ?? []).find(entry => entry.name.startsWith(namePrefix));
 }
 
-const BUTUD = {
-  name: 'Butud',
-  level: 70,
-  className: 'Rogue',
+const JUDY = {
+  name: 'Judgement',
+  surname: 'Judy',
+  level: 10,
+  className: 'Paladin',
   rank: 4,
-  kills: 500,
-  brackets: { '2v2': { rating: 1800, rank: 40, won: 10, lost: 5 } }
+  kills: 500
 };
 
-const OWNERS = new Map([[characterKey({ name: 'Butud', realm: 'nightslayer' }), '99']]);
+const OWNERS = new Map([[characterKey({ name: 'Judgement', surname: 'Judy' }), '99']]);
 
 describe('formatChange', () => {
   it('signs a gain', () => expect(formatChange(150)).toBe('+150'));
@@ -47,16 +46,18 @@ describe('formatChange', () => {
 });
 
 describe('nameOf', () => {
-  it('adds a mention for a linked character', () => {
-    expect(nameOf({ name: 'Butud' }, 'nightslayer', OWNERS)).toBe('**Butud** (<@99>)');
+  it('shows the full name, and adds a mention for a linked character', () => {
+    expect(nameOf({ name: 'Judgement', surname: 'Judy' }, OWNERS)).toBe(
+      '**Judgement Judy** (<@99>)'
+    );
   });
 
   it('falls back to the character name when nobody has linked it', () => {
-    expect(nameOf({ name: 'Stranger' }, 'nightslayer', OWNERS)).toBe('**Stranger**');
+    expect(nameOf({ name: 'Stranger', surname: 'Smith' }, OWNERS)).toBe('**Stranger Smith**');
   });
 
   it('works with no owner index at all, which is the normal case at first', () => {
-    expect(nameOf({ name: 'Butud' }, 'nightslayer', undefined)).toBe('**Butud**');
+    expect(nameOf({ name: 'Judgement', surname: 'Judy' }, undefined)).toBe('**Judgement Judy**');
   });
 });
 
@@ -83,70 +84,46 @@ describe('listField', () => {
 
 describe('line builders', () => {
   it('describes a joiner with class and level', () => {
-    expect(membershipLines([{ name: 'Butud', className: 'Rogue', level: 70 }], 'nightslayer', OWNERS)).toEqual(
-      ['**Butud** (<@99>) — Rogue, level 70']
-    );
+    expect(
+      membershipLines([{ name: 'Judgement', surname: 'Judy', className: 'Paladin', level: 10 }], OWNERS)
+    ).toEqual(['**Judgement Judy** (<@99>) — Paladin, level 10']);
   });
 
   it('omits detail it does not have', () => {
-    expect(membershipLines([{ name: 'X' }], 'nightslayer', new Map())).toEqual(['**X**']);
+    expect(membershipLines([{ name: 'X', surname: 'Y' }], new Map())).toEqual(['**X Y**']);
   });
 
   it('celebrates hitting the cap', () => {
-    expect(levelLines([{ name: 'X', from: 69, to: 70, cappedOut: true }], 'n', new Map()).at(0)).toContain('🎉');
+    expect(
+      levelLines([{ name: 'X', surname: 'Y', from: 9, to: 10, cappedOut: true }], new Map()).at(0)
+    ).toContain('🎉');
   });
 
   it('does not celebrate an ordinary level', () => {
-    expect(levelLines([{ name: 'X', from: 20, to: 21, cappedOut: false }], 'n', new Map()).at(0)).not.toContain(
-      '🎉'
-    );
+    expect(
+      levelLines([{ name: 'X', surname: 'Y', from: 4, to: 5, cappedOut: false }], new Map()).at(0)
+    ).not.toContain('🎉');
   });
 
   it('shows a rank move in both directions', () => {
-    expect(rankLines([{ name: 'X', from: 6, to: 2 }], 'n', new Map())).toEqual(['**X** — rank 6 → 2']);
-  });
-
-  it('shows rating movement on the ladder', () => {
-    const lines = ladderLines(
-      [{ name: 'X', rating: 1950, rank: 22, won: 20, lost: 7, isNew: false, ratingChange: 150 }],
-      'n',
-      new Map()
-    );
-
-    expect(lines.at(0)).toBe('`#22` **X** — 1,950 (+150) · 20W/7L');
-  });
-
-  it('marks a first appearance rather than inventing a gain', () => {
-    const lines = ladderLines(
-      [{ name: 'X', rating: 1500, rank: 900, won: 2, lost: 1, isNew: true, ratingChange: null }],
-      'n',
-      new Map()
-    );
-
-    expect(lines.at(0)).toContain('(new)');
-  });
-
-  it('suppresses the new marker on a first run, where everyone is new', () => {
-    const lines = ladderLines(
-      [{ name: 'X', rating: 1500, rank: 900, won: 2, lost: 1, isNew: true, ratingChange: null }],
-      'n',
-      new Map(),
-      { isFirstRun: true }
-    );
-
-    expect(lines.at(0)).not.toContain('new');
+    expect(rankLines([{ name: 'X', surname: 'Y', from: 6, to: 2 }], new Map())).toEqual([
+      '**X Y** — rank 6 → 2'
+    ]);
   });
 
   it('leads with the weekly gain, keeping the lifetime total secondary', () => {
-    expect(killLines([{ name: 'X', change: 300, total: 800 }], 'n', new Map()).at(0)).toBe(
-      '**X** — **+300** (800 total)'
+    expect(killLines([{ name: 'X', surname: 'Y', change: 300, total: 800 }], new Map()).at(0)).toBe(
+      '**X Y** — **+300** (800 total)'
     );
   });
 });
 
 describe('guildLabel', () => {
-  it('joins guild and realm', () => expect(guildLabel(GUILD)).toBe('Apex · Nightslayer'));
-  it('tolerates a missing realm', () => expect(guildLabel({ name: 'Apex' })).toBe('Apex'));
+  it('is just the guild name — there is no realm', () => {
+    expect(guildLabel(GUILD)).toBe('Circle of Lore');
+  });
+
+  it('tolerates a missing guild', () => expect(guildLabel(undefined)).toBe(''));
 });
 
 describe('describePeriod', () => {
@@ -164,46 +141,36 @@ describe('describePeriod', () => {
 });
 
 describe('buildReportEmbed', () => {
-  it('titles the report with the guild and realm', () => {
-    const embed = buildReportEmbed({ diff: diffSnapshots(null, snapshot([BUTUD])) });
-    expect(embed.toJSON().title).toBe('Weekly Report — Apex · Nightslayer');
+  it('titles the report with just the guild name', () => {
+    const embed = buildReportEmbed({ diff: diffSnapshots(null, snapshot([JUDY])) });
+    expect(embed.toJSON().title).toBe('Weekly Report — Circle of Lore');
   });
 
   it('always shows the headline totals', () => {
-    const embed = buildReportEmbed({ diff: diffSnapshots(null, snapshot([BUTUD])) });
+    const embed = buildReportEmbed({ diff: diffSnapshots(null, snapshot([JUDY])) });
 
     expect(field(embed, 'Members').value).toBe('1');
-    expect(field(embed, 'At Level 70').value).toBe('1');
-    expect(field(embed, 'Arena Ranked').value).toBe('1');
+    expect(field(embed, 'At Level 10').value).toBe('1');
   });
 
   it('reports joiners, leavers, level-ups and promotions', () => {
-    const before = snapshot([{ ...BUTUD, level: 69, rank: 6 }, { name: 'Gone', level: 40 }]);
-    const after = snapshot([BUTUD, { name: 'Newbie', level: 12 }]);
+    const before = snapshot([
+      { ...JUDY, level: 9, rank: 6 },
+      { name: 'Gone', surname: 'Smith', level: 8 }
+    ]);
+    const after = snapshot([JUDY, { name: 'Newbie', surname: 'Smith', level: 3 }]);
 
     const embed = buildReportEmbed({ diff: diffSnapshots(before, after) });
 
     expect(field(embed, '📥 Joined').value).toContain('Newbie');
     expect(field(embed, '📤 Left').value).toContain('Gone');
-    expect(field(embed, '⬆️ Level-ups').value).toContain('69 → 70');
+    expect(field(embed, '⬆️ Level-ups').value).toContain('9 → 10');
     expect(field(embed, '🎖️ Promotions').value).toContain('rank 6 → 4');
   });
 
-  it('gives each arena bracket its own field', () => {
-    const after = snapshot([
-      { ...BUTUD, brackets: { '2v2': { rating: 1800, rank: 40, won: 10, lost: 5 } } },
-      { name: 'Other', brackets: { '3v3': { rating: 2000, rank: 10, won: 30, lost: 9 } } }
-    ]);
-
-    const embed = buildReportEmbed({ diff: diffSnapshots(null, after) });
-
-    expect(field(embed, '⚔️ 2v2')).toBeDefined();
-    expect(field(embed, '⚔️ 3v3')).toBeDefined();
-  });
-
   it('mentions the people who linked their characters', () => {
-    const before = snapshot([{ ...BUTUD, kills: 100 }]);
-    const embed = buildReportEmbed({ diff: diffSnapshots(before, snapshot([BUTUD])), owners: OWNERS });
+    const before = snapshot([{ ...JUDY, kills: 100 }]);
+    const embed = buildReportEmbed({ diff: diffSnapshots(before, snapshot([JUDY])), owners: OWNERS });
 
     expect(field(embed, '💀 Honorable Kills').value).toContain('<@99>');
   });
@@ -220,26 +187,27 @@ describe('buildReportEmbed', () => {
 
   it('surfaces what could not be fetched', () => {
     const embed = buildReportEmbed({
-      diff: diffSnapshots(null, snapshot([BUTUD])),
-      warnings: ['3 of 240 honorable-kill lookups errored and were skipped.']
+      diff: diffSnapshots(null, snapshot([JUDY])),
+      warnings: ['3 of 33 honorable-kill lookups errored and were skipped.']
     });
 
     expect(field(embed, '⚠️ Incomplete').value).toContain('errored');
   });
 
-  it('carries the season and region in the footer', () => {
-    const embed = buildReportEmbed({ diff: diffSnapshots(null, snapshot([BUTUD])) });
-    expect(embed.toJSON().footer.text).toBe('Season 3 • US');
+  it('carries the region in the footer', () => {
+    const embed = buildReportEmbed({ diff: diffSnapshots(null, snapshot([JUDY])) });
+    expect(embed.toJSON().footer.text).toBe('EU');
   });
 
   it('never exceeds a field limit, even for a very large guild', () => {
     const many = Array.from({ length: 300 }, (_, i) => ({
       name: `Averyveryverylongcharactername${i}`,
-      level: 70,
+      surname: 'Smith',
+      level: 10,
       kills: 1000 + i
     }));
 
-    const before = snapshot(many.map(m => ({ ...m, kills: 0, level: 69 })));
+    const before = snapshot(many.map(m => ({ ...m, kills: 0, level: 9 })));
     const embed = buildReportEmbed({ diff: diffSnapshots(before, snapshot(many)) });
 
     for (const entry of embed.toJSON().fields) {

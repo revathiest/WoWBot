@@ -5,8 +5,6 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getCharacterProfile, getCharacterEquipment } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const {
-  addGameOption,
-  addRealmOption,
   addRegionOption,
   addSurnameOption,
   resolveCharacterTarget,
@@ -26,18 +24,16 @@ const data = new SlashCommandBuilder()
     option.setName('character').setDescription('Character name.').setRequired(true)
   );
 
-addRealmOption(data);
 addSurnameOption(data);
-addGameOption(data);
 addRegionOption(data);
 
-function itemLink(item, game) {
+function itemLink(item) {
   const id = item.item?.id;
   const name = item.name ?? 'Unknown item';
-  return id ? `[${name}](${wowheadItemUrl(id, game)})` : name;
+  return id ? `[${name}](${wowheadItemUrl(id)})` : name;
 }
 
-function buildEmbed({ profile, audit, scope, characterName, game }) {
+function buildEmbed({ profile, audit, scope, characterName }) {
   const { missing, optional, gemCount, requiredTotal, requiredEnchanted, optionalEnchanted } =
     audit;
 
@@ -50,7 +46,7 @@ function buildEmbed({ profile, audit, scope, characterName, game }) {
   const embed = new EmbedBuilder()
     .setColor(profile ? classColor(profile.character_class?.name) : color)
     // Blizzard's casing beats what was typed, but only if it is the WHOLE name:
-    // a realmless profile splits it across `name` and `surname`.
+    // a profile splits it across `name` and `surname`.
     .setTitle(
       `Enchant Audit — ${
         [profile?.name, profile?.surname].filter(Boolean).join(' ') || characterName
@@ -79,16 +75,14 @@ function buildEmbed({ profile, audit, scope, characterName, game }) {
   if (missing.length > 0) {
     embed.addFields({
       name: 'Missing Enchants',
-      value: missing
-        .map(({ item }) => `❌ **${item.slot?.name}** — ${itemLink(item, game)}`)
-        .join('\n')
+      value: missing.map(({ item }) => `❌ **${item.slot?.name}** — ${itemLink(item)}`).join('\n')
     });
   }
 
   if (optional.length > 0) {
     embed.addFields({
       name: 'Rings (enchanters only)',
-      value: optional.map(({ item }) => `• ${item.slot?.name} — ${itemLink(item, game)}`).join('\n')
+      value: optional.map(({ item }) => `• ${item.slot?.name} — ${itemLink(item)}`).join('\n')
     });
   }
 
@@ -105,34 +99,29 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   const scope = resolveScope(interaction);
-
-  const target = await resolveCharacterTarget({ interaction, scope });
+  const target = resolveCharacterTarget({ interaction });
 
   if (target.error) {
     await interaction.editReply(`❌ ${target.error}`);
     return;
   }
 
-  const { realmSlug, characterName, displayName } = target;
-  const lookup = { region: scope.region, game: scope.game };
+  const { characterName, displayName } = target;
+  const lookup = { region: scope.region };
 
   let equipment;
   try {
-    equipment = await getCharacterEquipment(realmSlug, characterName, lookup);
+    equipment = await getCharacterEquipment(characterName, lookup);
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
-      const where = target.realmLabel ? ` on **${target.realmLabel}**` : '';
-
-      await interaction.editReply(
-        `❌ No character named **${displayName}**${where} (${scope.label}).`
-      );
+      await interaction.editReply(`❌ No character named **${displayName}** (${scope.label}).`);
       return;
     }
     throw err;
   }
 
   // The profile only supplies colour and item level, so a failure here is not fatal.
-  const profile = await getCharacterProfile(realmSlug, characterName, lookup).catch(err => {
+  const profile = await getCharacterProfile(characterName, lookup).catch(err => {
     console.warn(`Could not load profile for ${characterName}: ${err.message}`);
     return null;
   });
@@ -140,14 +129,12 @@ async function execute(interaction) {
   const audit = auditEquipment(equipment);
 
   if (audit.checked === 0) {
-    await interaction.editReply(
-      `❌ **${displayName}** has nothing equipped that takes an enchant.`
-    );
+    await interaction.editReply(`❌ **${displayName}** has nothing equipped that takes an enchant.`);
     return;
   }
 
   await interaction.editReply({
-    embeds: [buildEmbed({ profile, audit, scope, characterName: displayName, game: scope.game })]
+    embeds: [buildEmbed({ profile, audit, scope, characterName: displayName })]
   });
 }
 

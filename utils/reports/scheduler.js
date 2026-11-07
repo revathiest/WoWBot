@@ -117,7 +117,7 @@ async function buildAllReports({
       reports.push(await buildGuildReport(guild, { persist, now, onProgress, presentUserIds }));
     } catch (err) {
       failures.push({ guild, error: err });
-      console.error(`❌ Weekly report failed for ${guild.name}-${guild.realm}:`, err.message);
+      console.error(`❌ Weekly report failed for ${guild.name} (${guild.region}):`, err.message);
     }
   }
 

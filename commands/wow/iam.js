@@ -4,9 +4,9 @@
 // anybody.
 //
 // Entirely optional. Reports are built from guild rosters and read fine with
-// nobody linked; a link only upgrades "Butud" into "Butud (@you)". That is why
-// this command needs no permissions and why `forget` deletes everything in one
-// step — see the note at the top of utils/reports/links.js.
+// nobody linked; a link only upgrades "Judgement" into "Judgement (@you)".
+// That is why this command needs no permissions and why `forget` deletes
+// everything in one step — see the note at the top of utils/reports/links.js.
 
 const {
   SlashCommandBuilder,
@@ -29,15 +29,12 @@ const { planGuild, syncGuild, syncMember } = require('../../utils/nicknames/sync
 const { getCharacterProfile } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const {
-  addGameOption,
-  addRealmOption,
   addRegionOption,
   addSurnameOption,
   resolveCharacterTarget,
   resolveScope
 } = require('../../utils/commandOptions');
 const { classColor, FALLBACK_COLOR } = require('../../utils/wow');
-const { GAMES: GAME_VERSIONS } = require('../../config');
 
 const data = new SlashCommandBuilder()
   .setName('iam')
@@ -49,13 +46,11 @@ const data = new SlashCommandBuilder()
       .addStringOption(option =>
         option.setName('character').setDescription('Character name.').setRequired(true)
       );
-    addRealmOption(sub);
     addSurnameOption(sub);
-    addGameOption(sub);
     addRegionOption(sub);
     return sub;
   })
-  .addSubcommand(sub => {
+  .addSubcommand(sub =>
     sub
       .setName('remove')
       .setDescription('Unclaim a character.')
@@ -63,13 +58,9 @@ const data = new SlashCommandBuilder()
         option.setName('character').setDescription('Character name.').setRequired(true)
       )
       .addStringOption(option =>
-        option.setName('realm').setDescription('Realm, if you have claimed the name twice.')
+        option.setName('surname').setDescription('Surname, if you have claimed the first name twice.')
       )
-      .addStringOption(option =>
-        option.setName('surname').setDescription('Surname, for Classic Forever characters.')
-      );
-    return sub;
-  })
+  )
   .addSubcommand(sub =>
     sub
       .setName('list')
@@ -86,10 +77,7 @@ const data = new SlashCommandBuilder()
         option.setName('character').setDescription('Character name.').setRequired(true)
       )
       .addStringOption(option =>
-        option.setName('realm').setDescription('Realm, if you have claimed the name twice.')
-      )
-      .addStringOption(option =>
-        option.setName('surname').setDescription('Surname, for Classic Forever characters.')
+        option.setName('surname').setDescription('Surname, if you have claimed the first name twice.')
       )
   )
   .addSubcommand(sub =>
@@ -109,9 +97,7 @@ const data = new SlashCommandBuilder()
           .addStringOption(option =>
             option.setName('character').setDescription('Character name.').setRequired(true)
           );
-        addRealmOption(sub);
         addSurnameOption(sub);
-        addGameOption(sub);
         addRegionOption(sub);
         return sub;
       })
@@ -126,10 +112,7 @@ const data = new SlashCommandBuilder()
             option.setName('character').setDescription('Character name.').setRequired(true)
           )
           .addStringOption(option =>
-            option.setName('realm').setDescription('Realm, if the name is linked twice.')
-          )
-          .addStringOption(option =>
-            option.setName('surname').setDescription('Surname, for Classic Forever characters.')
+            option.setName('surname').setDescription('Surname, if the first name is linked twice.')
           )
       )
       .addSubcommand(sub =>
@@ -143,10 +126,7 @@ const data = new SlashCommandBuilder()
             option.setName('character').setDescription('Character name.').setRequired(true)
           )
           .addStringOption(option =>
-            option.setName('realm').setDescription('Realm, if the name is linked twice.')
-          )
-          .addStringOption(option =>
-            option.setName('surname').setDescription('Surname, for Classic Forever characters.')
+            option.setName('surname').setDescription('Surname, if the first name is linked twice.')
           )
       )
       .addSubcommand(sub =>
@@ -172,13 +152,8 @@ const data = new SlashCommandBuilder()
   });
 
 function characterLine(character) {
-  const version = GAME_VERSIONS[character.game]?.label ?? character.game;
-  // A realmless character stores no realm, and its surname is already part of
-  // the name, so the realm segment is dropped rather than printed as `null`.
   const fullName = [character.name, character.surname].filter(Boolean).join(' ');
-  const where = character.realm ? ` · ${character.realm}` : '';
-
-  return `**${fullName}**${where} (${character.region.toUpperCase()} · ${version})`;
+  return `**${fullName}** (${character.region.toUpperCase()})`;
 }
 
 function buildListEmbed(userId, characters) {
@@ -209,55 +184,43 @@ async function add(interaction, { targetId = interaction.user.id, force = false 
   // Reused for /iam manage assign, where the character belongs to somebody
   // other than whoever ran the command.
   const self = targetId === interaction.user.id;
-  const target = await resolveCharacterTarget({ interaction, scope });
+  const target = resolveCharacterTarget({ interaction });
 
   if (target.error) {
     await interaction.editReply(`❌ ${target.error}`);
     return;
   }
 
-  const { realmSlug, characterName, displayName, realmQuery: realm } = target;
+  const { characterName, displayName } = target;
 
   let profile;
   try {
-    profile = await getCharacterProfile(realmSlug, characterName, {
-      region: scope.region,
-      game: scope.game
-    });
+    profile = await getCharacterProfile(characterName, { region: scope.region });
   } catch (err) {
     if ((err instanceof BlizzardApiError || err?.name === 'BlizzardApiError') && err.status === 404) {
       await interaction.editReply(
-        `❌ No character named **${displayName}** on \`${realmSlug ?? characterName}\` ` +
-          `(${scope.label}). Check the spelling, ` +
-          `${realmSlug ? 'realm' : 'surname'}, and game version.`
+        `❌ No character named **${displayName}** (${scope.label}). ` +
+          'Check the spelling and surname.'
       );
       return;
     }
     throw err;
   }
 
-  // Realmless flavours identify a character by surname instead of realm, and
   // Blizzard's own casing is better than whatever was typed for both halves.
-  const storedRealm = realmSlug ? target.realmLabel || realm : null;
-  const storedSurname = realmSlug ? null : profile.surname ?? null;
-  const where = storedRealm ?? profile.ruleset?.name ?? scope.label;
-
   const { linked, reason, claimedBy, movedFrom } = linkCharacter(
     targetId,
     {
-      // Store Blizzard's casing rather than whatever was typed.
       name: profile.name ?? characterName,
-      surname: storedSurname,
-      realm: storedRealm,
-      region: scope.region,
-      game: scope.game
+      surname: profile.surname ?? null,
+      region: scope.region
     },
     { force }
   );
 
   if (linked) {
     const fullName = [profile.name, profile.surname].filter(Boolean).join(' ');
-    const lines = [`✅ **${fullName}** · ${where} is linked to <@${targetId}>.`];
+    const lines = [`✅ **${fullName}** (${scope.label}) is linked to <@${targetId}>.`];
 
     if (movedFrom) {
       // Never let a reassignment happen silently — somebody just lost a claim.
@@ -318,11 +281,10 @@ async function add(interaction, { targetId = interaction.user.id, force = false 
 
 function remove(interaction, { targetId = interaction.user.id } = {}) {
   const characterName = interaction.options.getString('character');
-  const realm = interaction.options.getString('realm');
+  const surname = interaction.options.getString('surname');
   const self = targetId === interaction.user.id;
 
-  const surname = interaction.options.getString('surname');
-  const { removed } = unlinkCharacter(targetId, { name: characterName, realm, surname });
+  const { removed } = unlinkCharacter(targetId, { name: characterName, surname });
 
   if (removed) {
     return self
@@ -367,12 +329,11 @@ function describeNickname(plan) {
 /** Moves somebody's main, and renames them to match. */
 async function changeMain(interaction, { targetId }) {
   const characterName = interaction.options.getString('character');
-  const realm = interaction.options.getString('realm');
+  const surname = interaction.options.getString('surname');
   const self = targetId === interaction.user.id;
   const who = self ? 'your' : `<@${targetId}>'s`;
 
-  const surname = interaction.options.getString('surname');
-  const { changed, reason, main } = setMain(targetId, { name: characterName, realm, surname });
+  const { changed, reason, main } = setMain(targetId, { name: characterName, surname });
 
   if (!changed && reason === 'not-linked') {
     return `⚠️ **${characterName}** is not linked to ${self ? 'you' : `<@${targetId}>`}.`;
@@ -520,8 +481,7 @@ async function execute(interaction) {
   }
 
   if (subcommand === 'add') {
-    // A realm resolve plus a character lookup can exceed Discord's three-second
-    // window.
+    // The character lookup can exceed Discord's three-second window.
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     await add(interaction);
     return;

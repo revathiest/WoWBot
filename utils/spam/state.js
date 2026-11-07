@@ -3,7 +3,7 @@
 // in memory and lost on restart, which is deliberate: this is short-horizon
 // behaviour, not a punishment record.
 //
-// Follows the TTL approach in utils/blizzard/realms.js — absolute timestamps
+// Follows the TTL approach in utils/blizzard/rulesets.js — absolute timestamps
 // compared against Date.now(), never setTimeout — so tests can fast-forward with
 // jest.spyOn(Date, 'now').
 

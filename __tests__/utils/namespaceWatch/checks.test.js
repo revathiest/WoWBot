@@ -68,8 +68,9 @@ describe('the check list', () => {
   });
 
   it('does not watch endpoints the game cannot have', () => {
-    // No WoW Token and no arena in 1.60.1. `config/` records why in UNSUPPORTED;
-    // polling them would post an outage every time nothing changed.
+    // No WoW Token and no arena in 1.60.1 — the whole reason /token and /arena
+    // were removed from the bot entirely. Polling them would post an outage
+    // every time nothing changed.
     expect(BY_KEY.has('dynamic.token')).toBe(false);
     expect(BY_KEY.has('dynamic.pvp-season')).toBe(false);
   });

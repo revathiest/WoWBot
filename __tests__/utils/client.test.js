@@ -158,7 +158,7 @@ describe('request', () => {
     const [url, options] = global.fetch.mock.calls[1];
     expect(url.origin).toBe('https://us.api.blizzard.com');
     expect(url.pathname).toBe('/data/wow/token/index');
-    expect(url.searchParams.get('namespace')).toBe('dynamic-us');
+    expect(url.searchParams.get('namespace')).toBe('dynamic-forever-us');
     expect(url.searchParams.get('locale')).toBe('en_US');
     expect(options.headers.Authorization).toBe('Bearer access-token');
   });
@@ -175,7 +175,7 @@ describe('request', () => {
 
     const [url] = global.fetch.mock.calls[1];
     expect(url.origin).toBe('https://eu.api.blizzard.com');
-    expect(url.searchParams.get('namespace')).toBe('dynamic-eu');
+    expect(url.searchParams.get('namespace')).toBe('dynamic-forever-eu');
     expect(url.searchParams.get('locale')).toBe('de_DE');
   });
 

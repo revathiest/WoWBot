@@ -1,144 +1,26 @@
 // config/index.js
 // Central place for environment-derived settings, so nothing else reads process.env directly.
+//
+// This bot serves exactly one WoW flavour: Classic Forever, patch 1.60.1.
+// There is no `game` picker and no realm concept anywhere in here — Forever
+// has neither. See AGENTS.md ("Classic Forever") for what that namespace
+// actually serves.
 
 const REGIONS = ['us', 'eu', 'kr', 'tw'];
 
 const DEFAULT_REGION = 'us';
 const DEFAULT_LOCALE = 'en_US';
 
-/**
- * The three WoW flavours Blizzard exposes, and the namespace infix each one uses.
- * Verified by probing: only these exist — `classic2x`, `classictbc`, `classicwlk`
- * and similar all return 403.
- *
- *   retail       -> profile-us            (modern WoW)
- *   anniversary  -> profile-classicann-us (TBC Anniversary: Dreamscythe,
- *                                          Nightslayer, Maladath, Thunderstrike,
- *                                          Spineshatter)
- *   classic      -> profile-classic-us    (progression Classic, currently the
- *                                          Mists of Pandaria track)
- *   classic-era  -> profile-classic1x-us  (permanent vanilla, incl. Hardcore)
- *
- * `classicann` is undocumented in the API reference and was not discoverable by
- * probing — it came from Blizzard's own API forum. Do not assume a namespace is
- * absent because it 403s.
- *
- * A 403 and a 404 do NOT mean the same thing, though, which is worth knowing
- * before concluding anything from a probe (measured 2026-11-06):
- *
- *   403 BLZWEBAPI00000403  the namespace is not recognised, or not ours to read.
- *                          Returned for `zzqqxxnonsense`, `classic2x`,
- *                          `classictbc`, `era`, `vanilla`, `hardcore`, and for
- *                          omitting the parameter entirely.
- *   404 BLZWEBAPI00000404  the namespace IS accepted; that path has no document
- *                          in it. `dynamic-us` plus a bogus realm slug 404s too.
- *
- * So a 404 is positive evidence that a namespace exists. A 403 remains
- * ambiguous.
- */
-const GAMES = {
-  retail: { label: 'Retail', infix: null },
-  anniversary: { label: 'TBC Anniversary', infix: 'classicann' },
-  classic: { label: 'Classic', infix: 'classic' },
-  'classic-era': { label: 'Classic Era', infix: 'classic1x' },
-  // Classic Forever is addressed differently from every other flavour: no
-  // realms, and three features Blizzard does not serve. Read REALMLESS_GAMES
-  // and UNSUPPORTED below before writing anything that takes a realm.
-  forever: { label: 'Classic Forever', infix: 'forever' }
-};
-
-const DEFAULT_GAME = 'retail';
+// The one namespace infix this bot ever uses. Kept as a named constant rather
+// than inlined so a reader of `buildNamespace` sees why it never varies.
+const GAME_INFIX = 'forever';
 
 /**
- * Flavours Blizzard answers for, but that are NOT offered to users yet.
- *
- * Empty on purpose, and kept rather than deleted: `forever` lived here while it
- * was unreachable, and the next unreleased flavour will too. An entry here is
- * addressable by `buildNamespace` but refused by `normalizeGame`, which is the
- * difference between "the bot can probe it" and "a user can pick it".
+ * Builds the full namespace header value, e.g. ('dynamic', 'us') ->
+ * 'dynamic-forever-us'.
  */
-const PENDING_GAMES = {};
-
-// Everything `buildNamespace` can address, released or not.
-const ALL_FLAVOURS = { ...GAMES, ...PENDING_GAMES };
-
-/**
- * Flavours where a character has NO realm.
- *
- * Classic Forever replaced realms with RULESETS. Measured 2026-11-06 against the
- * live API, and corroborated on Blizzard's API forum:
- *
- *   - A character is ONE path segment, `{name}-{surname}` lowercased:
- *     `/profile/wow/character/judgement-judy` → 200, with `realm: null`, a
- *     `surname` field, and a `ruleset` of `{ id, name }`.
- *   - A guild is one segment too: `/data/wow/guild/circle-of-lore` → 200, and
- *     `/roster` under it works.
- *   - `/data/wow/ruleset/index` → 200 with four rulesets — 1 PvP, 2 Normal,
- *     3 Roleplay, 15 Roleplay PvP — each carrying a `status` and an `auctions`
- *     link. These are the nearest thing to a realm, and what /realm and /realms
- *     report for this flavour.
- *   - `/data/wow/realm/index` and `/data/wow/connected-realm/index` 404, while
- *     `/data/wow/search/realm` returns 200 with `pageCount: 0`. The realm
- *     collection is live and permanently EMPTY, not unpublished. Nothing should
- *     wait for it to fill.
- *
- * Why a Set and not a flag on the GAMES entry: every realm-taking path has to
- * ask this, and a Set keeps the answer one import away from code that has no
- * other reason to read a flavour's metadata.
- */
-const REALMLESS_GAMES = new Set(['forever']);
-
-/** Whether characters in this flavour are addressed without a realm. */
-function isRealmless(game) {
-  return REALMLESS_GAMES.has(String(game ?? '').trim().toLowerCase());
-}
-
-/**
- * Features a flavour's API does not serve, and why.
- *
- * The text is user-facing — it is what a command replies instead of failing —
- * so it has to explain rather than just decline. All three below are properties
- * of the game, not gaps Blizzard will fill: 1.60.1 is vanilla, which had no WoW
- * Token, no arenas and no Mythic+.
- */
-const UNSUPPORTED = {
-  forever: {
-    token:
-      'Classic Forever has no WoW Token. It runs on patch 1.60.1 (vanilla), and ' +
-      'Blizzard serves no token endpoint for it.',
-    arena:
-      'Classic Forever has no arenas. Arena arrived in The Burning Crusade, so ' +
-      'there are no PvP seasons or leaderboards — only the vanilla honour system.',
-    mythicplus:
-      'Classic Forever has no Mythic+. Keystones arrived in Legion, so the ' +
-      'endpoint reports a period id and nothing else.'
-  }
-};
-
-/**
- * Why `feature` cannot work for `game`, or null when it can.
- *
- * Returns the reason rather than a boolean so that a command which cannot answer
- * says why in the same breath — which keeps the explanation next to the fact.
- */
-function unsupportedReason(game, feature) {
-  const key = String(game ?? '').trim().toLowerCase();
-  return UNSUPPORTED[key]?.[feature] ?? null;
-}
-
-function normalizeGame(value) {
-  const game = String(value ?? '').trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(GAMES, game) ? game : null;
-}
-
-/**
- * Builds the full namespace header value, e.g. ('dynamic','classic','us') ->
- * 'dynamic-classic-us'. Resolves PENDING_GAMES too, so the watcher can reach a
- * namespace that is not a selectable game version.
- */
-function buildNamespace(namespace, game, region) {
-  const infix = ALL_FLAVOURS[game ?? DEFAULT_GAME]?.infix;
-  return infix ? `${namespace}-${infix}-${region}` : `${namespace}-${region}`;
+function buildNamespace(namespace, region) {
+  return `${namespace}-${GAME_INFIX}-${region}`;
 }
 
 /**
@@ -150,22 +32,10 @@ function buildNamespace(namespace, game, region) {
  * public. Recorded here so that restoring is reading a list rather than
  * reconstructing one from memory.
  *
- * Two of them are public commands with admin-only SUBCOMMANDS, which keep their
- * own gating either way: /help (setup, unlock) and /iam (manage).
+ * One of them is a public command with admin-only SUBCOMMANDS, which keeps its
+ * own gating either way: /iam (manage).
  */
-const PUBLIC_COMMANDS = [
-  'arena',
-  'audit',
-  'character',
-  'guild',
-  'help',
-  'iam',
-  'item',
-  'mythicplus',
-  'realm',
-  'realms',
-  'token'
-];
+const PUBLIC_COMMANDS = ['audit', 'character', 'guild', 'help', 'iam', 'item', 'realm', 'realms'];
 
 /**
  * Locks every command to Manage Server.
@@ -189,8 +59,8 @@ function normalizeRegion(value) {
 // needs no configuration step to start reporting.
 const DEFAULT_WATCH_CHANNEL = 'bot-activity-log';
 
-// Six hours. An unreleased namespace going live is a thing that happens on
-// Blizzard's schedule, measured in weeks, so polling harder buys nothing.
+// Six hours. A regression in an endpoint this bot depends on is a thing that
+// would be noticed within a day either way, so polling harder buys nothing.
 const DEFAULT_WATCH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 // Below this the poll is just noise against someone else's API quota.
@@ -229,10 +99,7 @@ function readConfig(env = process.env) {
       clientId: env.BLIZZARD_CLIENT_ID ?? '',
       clientSecret: env.BLIZZARD_CLIENT_SECRET ?? '',
       region: normalizeRegion(env.BLIZZARD_REGION) ?? DEFAULT_REGION,
-      locale: (env.BLIZZARD_LOCALE ?? '').trim() || DEFAULT_LOCALE,
-      game: normalizeGame(env.BLIZZARD_GAME) ?? DEFAULT_GAME,
-      // Optional home realm, so commands can omit `realm` entirely.
-      realm: (env.BLIZZARD_REALM ?? '').trim() || null
+      locale: (env.BLIZZARD_LOCALE ?? '').trim() || DEFAULT_LOCALE
     },
     namespaceWatch: {
       enabled: readFlag(env.NAMESPACE_WATCH, true),
@@ -265,23 +132,16 @@ function validateConfig(config = readConfig()) {
 module.exports = {
   PUBLIC_COMMANDS,
   REGIONS,
-  GAMES,
-  PENDING_GAMES,
-  REALMLESS_GAMES,
-  UNSUPPORTED,
+  GAME_INFIX,
   DEFAULT_REGION,
   DEFAULT_LOCALE,
-  DEFAULT_GAME,
   DEFAULT_WATCH_CHANNEL,
   DEFAULT_WATCH_INTERVAL_MS,
   MIN_WATCH_INTERVAL_MS,
   buildNamespace,
-  normalizeGame,
   normalizeRegion,
-  isRealmless,
   readAdminOnly,
   readFlag,
-  unsupportedReason,
   readConfig,
   validateConfig
 };

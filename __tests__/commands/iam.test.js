@@ -1,5 +1,4 @@
 jest.mock('../../utils/blizzard/profile');
-jest.mock('../../utils/blizzard/realms');
 jest.mock('../../utils/reports/links', () => ({
   ...jest.requireActual('../../utils/reports/links'),
   charactersFor: jest.fn(),
@@ -17,7 +16,6 @@ jest.mock('../../utils/nicknames/config', () => ({
 jest.mock('../../utils/nicknames/sync');
 
 const { getCharacterProfile } = require('../../utils/blizzard/profile');
-const { resolveRealm } = require('../../utils/blizzard/realms');
 const {
   MAX_CHARACTERS_PER_USER,
   charactersFor,
@@ -32,7 +30,7 @@ const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/iam');
 const { createInteraction } = require('../helpers/interaction');
 
-const BUTUD = { name: 'Butud', realm: 'Nightslayer', region: 'us', game: 'anniversary' };
+const JUDY = { name: 'Judgement', surname: 'Judy', region: 'eu' };
 
 function interaction({
   subcommand,
@@ -65,13 +63,16 @@ function said(fake) {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  resolveRealm.mockResolvedValue({ slug: 'nightslayer', name: 'Nightslayer', resolved: true });
-  getCharacterProfile.mockResolvedValue({ name: 'Butud', character_class: { name: 'Rogue' } });
+  getCharacterProfile.mockResolvedValue({
+    name: 'Judgement',
+    surname: 'Judy',
+    character_class: { name: 'Paladin' }
+  });
   linkCharacter.mockReturnValue({ linked: true, reason: null });
   unlinkCharacter.mockReturnValue({ removed: true, characters: [] });
   charactersFor.mockReturnValue([]);
   forget.mockReturnValue({ removed: 1 });
-  setMain.mockReturnValue({ changed: true, reason: null, main: { name: 'Butud' } });
+  setMain.mockReturnValue({ changed: true, reason: null, main: { name: 'Judgement' } });
   loadNicknameConfig.mockReturnValue({ enabled: false, lastSyncAt: null });
   syncMember.mockResolvedValue(null);
   planGuild.mockReturnValue([]);
@@ -98,55 +99,64 @@ describe('command shape', () => {
 describe('/iam add', () => {
   it('confirms the character exists before storing it', async () => {
     // A typo that never matches a roster would otherwise sit in the file forever.
-    const fake = interaction({ subcommand: 'add', options: { character: 'Butud' } });
+    const fake = interaction({ subcommand: 'add', options: { character: 'Judgement-Judy' } });
     await command.execute(fake);
 
-    expect(getCharacterProfile).toHaveBeenCalledWith('nightslayer', 'Butud', expect.any(Object));
+    expect(getCharacterProfile).toHaveBeenCalledWith('judgement-judy', expect.any(Object));
     expect(linkCharacter).toHaveBeenCalledWith(
       'user-1',
-      expect.objectContaining({ name: 'Butud' }),
+      expect.objectContaining({ name: 'Judgement', surname: 'Judy' }),
       { force: false }
     );
   });
 
   it('stores Blizzard\'s casing rather than what was typed', async () => {
-    const fake = interaction({ subcommand: 'add', options: { character: 'bUtUd' } });
+    const fake = interaction({ subcommand: 'add', options: { character: 'jUdGeMeNt-jUdY' } });
     await command.execute(fake);
 
     expect(linkCharacter).toHaveBeenCalledWith(
       'user-1',
-      expect.objectContaining({ name: 'Butud' }),
+      expect.objectContaining({ name: 'Judgement', surname: 'Judy' }),
       { force: false }
     );
   });
 
   it('replies only to the person running it', async () => {
-    const fake = interaction({ subcommand: 'add', options: { character: 'Butud' } });
+    const fake = interaction({ subcommand: 'add', options: { character: 'Judgement-Judy' } });
     await command.execute(fake);
 
     expect(fake.deferReply).toHaveBeenCalledWith(expect.objectContaining({ flags: expect.anything() }));
   });
 
-  it('names the realm it tried when the character does not exist', async () => {
-    getCharacterProfile.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
-    const fake = interaction({ subcommand: 'add', options: { character: 'Typo' } });
+  it('asks for a surname instead of a bare name', async () => {
+    const fake = interaction({ subcommand: 'add', options: { character: 'Judgement' } });
 
     await command.execute(fake);
 
-    expect(said(fake)).toContain('nightslayer');
+    expect(said(fake)).toContain('surname');
+    expect(getCharacterProfile).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing character', async () => {
+    getCharacterProfile.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
+    const fake = interaction({ subcommand: 'add', options: { character: 'Typo-Smith' } });
+
+    await command.execute(fake);
+
+    expect(said(fake)).toContain('Typo Smith');
     expect(linkCharacter).not.toHaveBeenCalled();
   });
 
   it('lets a non-404 propagate to the shared error handler', async () => {
     getCharacterProfile.mockRejectedValue(new BlizzardApiError('Boom', { status: 500 }));
-    const fake = interaction({ subcommand: 'add', options: { character: 'Butud' } });
+    const fake = interaction({ subcommand: 'add', options: { character: 'Judgement-Judy' } });
 
     await expect(command.execute(fake)).rejects.toThrow('Boom');
   });
 
   it('refuses a character somebody else claimed, and points at them', async () => {
     linkCharacter.mockReturnValue({ linked: false, reason: 'claimed', claimedBy: 'user-2' });
-    const fake = interaction({ subcommand: 'add', options: { character: 'Butud' } });
+    const fake = interaction({ subcommand: 'add', options: { character: 'Judgement-Judy' } });
 
     await command.execute(fake);
 
@@ -155,7 +165,7 @@ describe('/iam add', () => {
 
   it('says so when the character is already linked to you', async () => {
     linkCharacter.mockReturnValue({ linked: false, reason: 'duplicate' });
-    const fake = interaction({ subcommand: 'add', options: { character: 'Butud' } });
+    const fake = interaction({ subcommand: 'add', options: { character: 'Judgement-Judy' } });
 
     await command.execute(fake);
 
@@ -164,7 +174,7 @@ describe('/iam add', () => {
 
   it('names the cap when a user has linked too many', async () => {
     linkCharacter.mockReturnValue({ linked: false, reason: 'full' });
-    const fake = interaction({ subcommand: 'add', options: { character: 'Butud' } });
+    const fake = interaction({ subcommand: 'add', options: { character: 'Judgement-Judy' } });
 
     await command.execute(fake);
 
@@ -174,16 +184,10 @@ describe('/iam add', () => {
 
 describe('/iam remove', () => {
   it('unlinks a character', async () => {
-    const fake = interaction({ subcommand: 'remove', options: { character: 'Butud' } });
+    const fake = interaction({ subcommand: 'remove', options: { character: 'Judgement', surname: 'Judy' } });
     await command.execute(fake);
 
-    expect(unlinkCharacter).toHaveBeenCalledWith('user-1', {
-      name: 'Butud',
-      realm: null,
-      // Narrows the match on realmless flavours, where two characters can share
-      // a first name.
-      surname: null
-    });
+    expect(unlinkCharacter).toHaveBeenCalledWith('user-1', { name: 'Judgement', surname: 'Judy' });
     expect(said(fake)).toContain('no longer linked');
   });
 
@@ -199,12 +203,12 @@ describe('/iam remove', () => {
 
 describe('/iam list', () => {
   it('lists your characters', async () => {
-    charactersFor.mockReturnValue([BUTUD]);
+    charactersFor.mockReturnValue([JUDY]);
     const fake = interaction({ subcommand: 'list' });
 
     await command.execute(fake);
 
-    expect(said(fake)).toContain('Butud');
+    expect(said(fake)).toContain('Judgement Judy');
   });
 
   it('explains how to start when nothing is linked', async () => {
@@ -243,7 +247,7 @@ describe('/iam forget', () => {
 
 describe('buildListEmbed', () => {
   it('shows how many slots are used', () => {
-    const embed = command.buildListEmbed('user-1', [BUTUD]).toJSON();
+    const embed = command.buildListEmbed('user-1', [JUDY]).toJSON();
     expect(embed.footer.text).toBe(`1 of ${MAX_CHARACTERS_PER_USER} slots used`);
   });
 
@@ -253,8 +257,8 @@ describe('buildListEmbed', () => {
 });
 
 describe('characterLine', () => {
-  it('names the game version, so alts across versions are distinguishable', () => {
-    expect(command.characterLine(BUTUD)).toContain('TBC Anniversary');
+  it('shows the full name and region', () => {
+    expect(command.characterLine(JUDY)).toBe('**Judgement Judy** (EU)');
   });
 });
 
@@ -264,7 +268,7 @@ describe('/iam manage', () => {
       subcommand: 'assign',
       subcommandGroup: 'manage',
       permissions: false,
-      options: { user: { id: 'user-9' }, character: 'Butud' }
+      options: { user: { id: 'user-9' }, character: 'Judgement-Judy' }
     });
 
     await command.execute(fake);
@@ -277,14 +281,14 @@ describe('/iam manage', () => {
     const fake = interaction({
       subcommand: 'assign',
       subcommandGroup: 'manage',
-      options: { user: { id: 'user-9' }, character: 'Butud' }
+      options: { user: { id: 'user-9' }, character: 'Judgement-Judy' }
     });
 
     await command.execute(fake);
 
     expect(linkCharacter).toHaveBeenCalledWith(
       'user-9',
-      expect.objectContaining({ name: 'Butud' }),
+      expect.objectContaining({ name: 'Judgement', surname: 'Judy' }),
       { force: true }
     );
     expect(said(fake)).toContain('<@user-9>');
@@ -296,7 +300,7 @@ describe('/iam manage', () => {
     const fake = interaction({
       subcommand: 'assign',
       subcommandGroup: 'manage',
-      options: { user: { id: 'user-9' }, character: 'Typo' }
+      options: { user: { id: 'user-9' }, character: 'Typo-Smith' }
     });
 
     await command.execute(fake);
@@ -310,7 +314,7 @@ describe('/iam manage', () => {
     const fake = interaction({
       subcommand: 'assign',
       subcommandGroup: 'manage',
-      options: { user: { id: 'user-9' }, character: 'Butud' }
+      options: { user: { id: 'user-9' }, character: 'Judgement-Judy' }
     });
 
     await command.execute(fake);
@@ -323,16 +327,12 @@ describe('/iam manage', () => {
     const fake = interaction({
       subcommand: 'unassign',
       subcommandGroup: 'manage',
-      options: { user: { id: 'user-9' }, character: 'Butud' }
+      options: { user: { id: 'user-9' }, character: 'Judgement', surname: 'Judy' }
     });
 
     await command.execute(fake);
 
-    expect(unlinkCharacter).toHaveBeenCalledWith('user-9', {
-      name: 'Butud',
-      realm: null,
-      surname: null
-    });
+    expect(unlinkCharacter).toHaveBeenCalledWith('user-9', { name: 'Judgement', surname: 'Judy' });
     expect(said(fake)).toContain('<@user-9>');
   });
 
@@ -353,10 +353,10 @@ describe('/iam manage', () => {
 
 describe('/iam main', () => {
   it('moves your own main', async () => {
-    const fake = interaction({ subcommand: 'main', options: { character: 'Alt' } });
+    const fake = interaction({ subcommand: 'main', options: { character: 'Alt', surname: 'Smith' } });
     await command.execute(fake);
 
-    expect(setMain).toHaveBeenCalledWith('user-1', { name: 'Alt', realm: null, surname: null });
+    expect(setMain).toHaveBeenCalledWith('user-1', { name: 'Alt', surname: 'Smith' });
     expect(said(fake)).toContain('your main');
   });
 
@@ -370,8 +370,8 @@ describe('/iam main', () => {
   });
 
   it('says so when it is already the main', async () => {
-    setMain.mockReturnValue({ changed: false, reason: 'already-main', main: { name: 'Butud' } });
-    const fake = interaction({ subcommand: 'main', options: { character: 'Butud' } });
+    setMain.mockReturnValue({ changed: false, reason: 'already-main', main: { name: 'Judgement' } });
+    const fake = interaction({ subcommand: 'main', options: { character: 'Judgement-Judy' } });
 
     await command.execute(fake);
 
@@ -382,7 +382,7 @@ describe('/iam main', () => {
     loadNicknameConfig.mockReturnValue({ enabled: true });
     syncMember.mockResolvedValue({ action: 'rename', to: 'Alt' });
 
-    const fake = interaction({ subcommand: 'main', options: { character: 'Alt' } });
+    const fake = interaction({ subcommand: 'main', options: { character: 'Alt', surname: 'Smith' } });
     fake.guild = { id: 'test-guild', members: { fetch: jest.fn(async () => ({ id: 'user-1' })) } };
 
     await command.execute(fake);
@@ -395,7 +395,7 @@ describe('/iam main', () => {
     loadNicknameConfig.mockReturnValue({ enabled: true });
     syncMember.mockResolvedValue({ action: 'skip', reason: 'their highest role is at or above the bot' });
 
-    const fake = interaction({ subcommand: 'main', options: { character: 'Alt' } });
+    const fake = interaction({ subcommand: 'main', options: { character: 'Alt', surname: 'Smith' } });
     fake.guild = { id: 'test-guild', members: { fetch: jest.fn(async () => ({ id: 'user-1' })) } };
 
     await command.execute(fake);
@@ -446,7 +446,7 @@ describe('/iam manage sync', () => {
 
   it('previews by default, changing nothing', async () => {
     planGuild.mockReturnValue([
-      { member: { id: 'u1', displayName: 'Ken' }, action: 'rename', from: 'Ken', to: 'Butud' }
+      { member: { id: 'u1', displayName: 'Ken' }, action: 'rename', from: 'Ken', to: 'Judgement' }
     ]);
 
     const fake = syncInteraction();
@@ -454,14 +454,14 @@ describe('/iam manage sync', () => {
 
     expect(syncGuild).not.toHaveBeenCalled();
     expect(said(fake)).toContain('Preview');
-    expect(said(fake)).toContain('Butud');
+    expect(said(fake)).toContain('Judgement');
   });
 
   it('renames for real when applied', async () => {
     planGuild.mockReturnValue([
-      { member: { id: 'u1', displayName: 'Ken' }, action: 'rename', from: 'Ken', to: 'Butud' }
+      { member: { id: 'u1', displayName: 'Ken' }, action: 'rename', from: 'Ken', to: 'Judgement' }
     ]);
-    syncGuild.mockResolvedValue({ renamed: [{ to: 'Butud' }], skipped: [] });
+    syncGuild.mockResolvedValue({ renamed: [{ to: 'Judgement' }], skipped: [] });
 
     const fake = syncInteraction({ apply: true });
     await command.execute(fake);

@@ -3,14 +3,6 @@ jest.mock('../../utils/blizzard/profile', () => ({
   getCharacterEquipment: jest.fn()
 }));
 
-jest.mock('../../utils/blizzard/realms', () => ({
-  resolveRealm: jest.fn(async query => ({
-    slug: String(query).toLowerCase(),
-    name: query,
-    resolved: true
-  }))
-}));
-
 const { getCharacterProfile, getCharacterEquipment } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/audit');
@@ -47,9 +39,10 @@ const slotItem = (type, name, enchants = []) => ({
 });
 
 const PROFILE = {
-  name: 'Zuggbeard',
-  character_class: { name: 'Warrior' },
-  equipped_item_level: 128
+  name: 'Judgement',
+  surname: 'Judy',
+  character_class: { name: 'Paladin' },
+  equipped_item_level: 8
 };
 
 beforeEach(() => {
@@ -69,19 +62,19 @@ describe('/audit', () => {
         slotItem('LEGS', 'Plate Legs', [permanent()])
       ]
     });
-    const target = interaction({ character: 'Zuggbeard', realm: 'Nightslayer', game: 'anniversary' });
+    const target = interaction({ character: 'Judgement-Judy' });
 
     await command.execute(target);
 
     const embed = embedOf(target);
+    expect(embed.title).toBe('Enchant Audit — Judgement Judy (US)');
     expect(embed.description).toContain('2 missing enchants');
     expect(field(embed, 'Enchanted').value).toBe('1 / 3');
 
     const missing = field(embed, 'Missing Enchants').value;
     expect(missing).toContain('HEAD');
     expect(missing).toContain('Plate Helm');
-    // Items link to the Wowhead database for the right game version.
-    expect(missing).toContain('wowhead.com/tbc/item=31988');
+    expect(missing).toContain('wowhead.com/classic/item=31988');
   });
 
   it('passes a fully enchanted character', async () => {
@@ -91,7 +84,7 @@ describe('/audit', () => {
         slotItem('CHEST', 'Chest', [permanent()])
       ]
     });
-    const target = interaction({ character: 'Mindbugger', realm: 'Nightslayer' });
+    const target = interaction({ character: 'Mindbugger-Smith' });
 
     await command.execute(target);
 
@@ -108,7 +101,7 @@ describe('/audit', () => {
         slotItem('FINGER_2', 'Ring Two')
       ]
     });
-    const target = interaction({ character: 'X', realm: 'Nightslayer' });
+    const target = interaction({ character: 'X-Smith' });
 
     await command.execute(target);
 
@@ -118,7 +111,7 @@ describe('/audit', () => {
     expect(field(embed, 'Rings (enchanters only)').value).toContain('Ring Two');
   });
 
-  it('never reports slots TBC cannot enchant', async () => {
+  it('never reports slots that cannot be enchanted', async () => {
     getCharacterEquipment.mockResolvedValue({
       equipped_items: [
         slotItem('HEAD', 'Helm', [permanent()]),
@@ -128,7 +121,7 @@ describe('/audit', () => {
         slotItem('TABARD', 'Tabard')
       ]
     });
-    const target = interaction({ character: 'X', realm: 'Nightslayer' });
+    const target = interaction({ character: 'X-Smith' });
 
     await command.execute(target);
 
@@ -139,7 +132,7 @@ describe('/audit', () => {
     getCharacterEquipment.mockResolvedValue({
       equipped_items: [slotItem('HEAD', 'Helm', [permanent(), gem(), gem()])]
     });
-    const target = interaction({ character: 'X', realm: 'Nightslayer' });
+    const target = interaction({ character: 'X-Smith' });
 
     await command.execute(target);
 
@@ -154,16 +147,25 @@ describe('/audit', () => {
     getCharacterEquipment.mockResolvedValue({
       equipped_items: [slotItem('HEAD', 'Helm', [permanent()])]
     });
-    const target = interaction({ character: 'X', realm: 'Nightslayer' });
+    const target = interaction({ character: 'X-Smith' });
 
     await command.execute(target);
 
-    expect(embedOf(target).title).toContain('X');
+    expect(embedOf(target).title).toContain('X Smith');
+  });
+
+  it('asks for a surname instead of a bare name', async () => {
+    const target = interaction({ character: 'Nobody' });
+
+    await command.execute(target);
+
+    expect(payload(target)).toContain('surname');
+    expect(getCharacterEquipment).not.toHaveBeenCalled();
   });
 
   it('explains a missing character', async () => {
     getCharacterEquipment.mockRejectedValue(new BlizzardApiError('Not found.', { status: 404 }));
-    const target = interaction({ character: 'Nobody', realm: 'Nightslayer' });
+    const target = interaction({ character: 'Nobody-Smith' });
 
     await command.execute(target);
 
@@ -173,14 +175,12 @@ describe('/audit', () => {
   it('rethrows other failures', async () => {
     getCharacterEquipment.mockRejectedValue(new BlizzardApiError('boom', { status: 500 }));
 
-    await expect(
-      command.execute(interaction({ character: 'X', realm: 'Nightslayer' }))
-    ).rejects.toThrow('boom');
+    await expect(command.execute(interaction({ character: 'X-Smith' }))).rejects.toThrow('boom');
   });
 
   it('says so when nothing equipped takes an enchant', async () => {
     getCharacterEquipment.mockResolvedValue({ equipped_items: [slotItem('TABARD', 'Tabard')] });
-    const target = interaction({ character: 'X', realm: 'Nightslayer' });
+    const target = interaction({ character: 'X-Smith' });
 
     await command.execute(target);
 

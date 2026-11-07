@@ -208,37 +208,13 @@ function formatDuration(ms) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-/**
- * Builds the armory URL for a character. Region subdomains differ from API regions
- * only in that the Americas armory lives under /en-us.
- */
-function armoryUrl({ region, realmSlug, characterName }) {
-  // Realmless flavours (Classic Forever) have no armory page: the site's
-  // character route is /character/{region}/{realm}/{name}, with no shape that
-  // omits the realm. Callers must treat null as "no link" rather than building
-  // a URL with "undefined" in it — see how /character guards the button.
-  if (!realmSlug) return null;
+// Wowhead has no Classic Forever database of its own. Forever is patch
+// 1.60.1, so the vanilla database is the correct one for its item ids —
+// verified against a real item (Thunderfury, id 19019).
+const WOWHEAD_PATH = 'classic/';
 
-  const localePath = { us: 'en-us', eu: 'en-gb', kr: 'ko-kr', tw: 'zh-tw' }[region] ?? 'en-us';
-  return `https://worldofwarcraft.blizzard.com/${localePath}/character/${region}/${realmSlug}/${encodeCharacterName(characterName)}`;
-}
-
-/**
- * Wowhead has a separate database per game version. Each path below was checked
- * against a real item of that era.
- */
-const WOWHEAD_PATH = {
-  retail: '',
-  anniversary: 'tbc/',
-  classic: 'mop-classic/',
-  'classic-era': 'classic/',
-  // Wowhead has no Classic Forever database. Forever is patch 1.60.1, so the
-  // vanilla database is the correct one for its item ids.
-  forever: 'classic/'
-};
-
-function wowheadItemUrl(itemId, game = 'retail') {
-  return `https://www.wowhead.com/${WOWHEAD_PATH[game] ?? ''}item=${itemId}`;
+function wowheadItemUrl(itemId) {
+  return `https://www.wowhead.com/${WOWHEAD_PATH}item=${itemId}`;
 }
 
 /** Pulls a named asset (avatar, inset, main-raw) out of a character-media payload. */
@@ -256,19 +232,12 @@ function mediaAsset(media, key) {
   return null;
 }
 
-/** Connected-realm references are hrefs; the id is the last path segment. */
-function idFromHref(href) {
-  const match = /\/(\d+)(?:\?|$)/.exec(String(href ?? ''));
-  return match ? Number(match[1]) : null;
-}
-
 module.exports = {
   CLASS_COLORS,
   QUALITY_COLORS,
   FACTION_COLORS,
   FALLBACK_COLOR,
   REGION_CHOICES,
-  armoryUrl,
   characterNamePart,
   characterSlug,
   classColor,
@@ -278,7 +247,6 @@ module.exports = {
   formatDuration,
   formatGold,
   formatNumber,
-  idFromHref,
   localized,
   mediaAsset,
   qualityColor,

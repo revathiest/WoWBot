@@ -3,8 +3,10 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getPlayableRealms, searchRealms } = require('../../utils/blizzard/realms');
+const { getRulesets, searchRulesets } = require('../../utils/blizzard/rulesets');
 const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { FALLBACK_COLOR } = require('../../utils/wow');
+const { isRealmless } = require('../../config');
 
 // Discord's limits: 25 fields per embed, 1024 characters per field value, and
 // 6000 characters across the whole embed. Stay under the total with room to
@@ -68,11 +70,39 @@ function groupIntoFields(names, {
   }));
 }
 
-function buildListEmbed({ realms, scope }) {
+/**
+ * What this flavour calls the thing being listed.
+ *
+ * Classic Forever has no realms; it has rulesets, which carry a name and an
+ * up/down status but are NOT part of a character's address. So the list is
+ * informational there, and the wording has to say so rather than inviting
+ * someone to pass a ruleset to `/character`.
+ */
+function termsFor(game) {
+  return isRealmless(game)
+    ? {
+        title: 'Rulesets',
+        // `noun` reads inside sentences ("No ruleset matches"); `listNoun` is
+        // the counted thing in the description ("4 ruleset(s)").
+        noun: 'ruleset',
+        listNoun: 'ruleset',
+        usage:
+          'This flavour has no realms — characters are identified by name and ' +
+          'surname, so these are for reference.'
+      }
+    : {
+        title: 'Realms',
+        noun: 'realm',
+        listNoun: 'playable realm',
+        usage: 'Use any of these names with `/character`, `/realm`, or `/mythicplus`.'
+      };
+}
+
+function buildListEmbed({ realms, scope, terms = termsFor(scope?.game) }) {
   const embed = new EmbedBuilder()
     .setColor(FALLBACK_COLOR)
-    .setTitle(`Realms — ${scope.label}`)
-    .setDescription(`${realms.length} playable realm(s). Use any of these names with \`/character\`, \`/realm\`, or \`/mythicplus\`.`);
+    .setTitle(`${terms.title} — ${scope.label}`)
+    .setDescription(`${realms.length} ${terms.listNoun}(s). ${terms.usage}`);
 
   const fields = groupIntoFields(realms.map(realm => realm.name));
   embed.addFields(fields);
@@ -85,12 +115,12 @@ function buildListEmbed({ realms, scope }) {
   return embed;
 }
 
-function buildSearchEmbed({ matches, query, scope }) {
+function buildSearchEmbed({ matches, query, scope, terms = termsFor(scope?.game) }) {
   const shown = matches.slice(0, MAX_SEARCH_RESULTS);
 
   const embed = new EmbedBuilder()
     .setColor(FALLBACK_COLOR)
-    .setTitle(`Realms matching "${query}" — ${scope.label}`)
+    .setTitle(`${terms.title} matching "${query}" — ${scope.label}`)
     .setDescription(shown.map(realm => `• **${realm.name}** — \`${realm.slug}\``).join('\n'));
 
   if (matches.length > shown.length) {
@@ -105,29 +135,35 @@ async function execute(interaction) {
 
   const scope = resolveScope(interaction);
   const query = interaction.options.getString('search');
+  const realmless = isRealmless(scope.game);
+  const terms = termsFor(scope.game);
 
-  const realms = await getPlayableRealms({ region: scope.region, game: scope.game });
+  // Rulesets are this flavour's realms. Same shape — name and slug — so the
+  // embeds and the search are shared.
+  const realms = realmless
+    ? await getRulesets({ region: scope.region, game: scope.game })
+    : await getPlayableRealms({ region: scope.region, game: scope.game });
 
   if (realms.length === 0) {
-    await interaction.editReply(`❌ No realms found for ${scope.label}.`);
+    await interaction.editReply(`❌ No ${terms.noun}s found for ${scope.label}.`);
     return;
   }
 
   if (!query) {
-    await interaction.editReply({ embeds: [buildListEmbed({ realms, scope })] });
+    await interaction.editReply({ embeds: [buildListEmbed({ realms, scope, terms })] });
     return;
   }
 
-  const matches = searchRealms(realms, query);
+  const matches = realmless ? searchRulesets(realms, query) : searchRealms(realms, query);
 
   if (matches.length === 0) {
     await interaction.editReply(
-      `❌ No realm in ${scope.label} matches **${query}**. Run \`/realms\` with no search to see them all.`
+      `❌ No ${terms.noun} in ${scope.label} matches **${query}**. Run \`/realms\` with no search to see them all.`
     );
     return;
   }
 
-  await interaction.editReply({ embeds: [buildSearchEmbed({ matches, query, scope })] });
+  await interaction.editReply({ embeds: [buildSearchEmbed({ matches, query, scope, terms })] });
 }
 
 module.exports = {
@@ -137,5 +173,6 @@ module.exports = {
   buildListEmbed,
   buildSearchEmbed,
   execute,
-  groupIntoFields
+  groupIntoFields,
+  termsFor
 };

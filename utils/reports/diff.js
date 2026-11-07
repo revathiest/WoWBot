@@ -13,9 +13,20 @@
 
 const { BRACKETS } = require('../blizzard/pvp');
 
-/** Roster entries are matched between weeks by name, which is stable per realm. */
-function memberKey(name) {
-  return String(name ?? '').trim().toLowerCase();
+/**
+ * Roster entries are matched between weeks by name, which is stable per realm.
+ *
+ * Realmless flavours (Classic Forever) need the surname too: a roster there can
+ * hold two characters with the same first name, and without the surname they
+ * would collapse into one entry and their kills and ranks would be attributed
+ * to whichever was read last. Omitting the surname produces the original
+ * name-only key, so snapshots written before this existed still match.
+ */
+function memberKey(name, surname = null) {
+  const first = String(name ?? '').trim().toLowerCase();
+  const last = String(surname ?? '').trim().toLowerCase();
+
+  return last ? `${first}-${last}` : first;
 }
 
 /**
@@ -29,11 +40,13 @@ function buildSnapshot({ guild, capturedAt, members = [] }) {
   const entries = {};
 
   for (const member of members) {
-    const key = memberKey(member.name);
+    const key = memberKey(member.name, member.surname);
     if (!key) continue;
 
     entries[key] = {
       name: member.name,
+      // Null for every flavour but Classic Forever, where it is half the name.
+      surname: member.surname ?? null,
       level: Number.isFinite(member.level) ? member.level : null,
       className: member.className ?? null,
       rank: Number.isFinite(member.rank) ? member.rank : null,

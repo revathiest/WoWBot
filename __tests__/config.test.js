@@ -1,13 +1,18 @@
 const {
   REGIONS,
   GAMES,
+  PENDING_GAMES,
+  REALMLESS_GAMES,
+  UNSUPPORTED,
   DEFAULT_REGION,
   DEFAULT_LOCALE,
   DEFAULT_GAME,
   buildNamespace,
+  isRealmless,
   normalizeGame,
   normalizeRegion,
   readConfig,
+  unsupportedReason,
   validateConfig
 } = require('../config');
 
@@ -173,5 +178,87 @@ describe('admin-only lockdown', () => {
       'realms',
       'token'
     ]);
+  });
+});
+
+describe('Classic Forever', () => {
+  it('is a selectable game version', () => {
+    // It lived in PENDING_GAMES while it was unusable. The bot now addresses it
+    // the way the API actually works, so it is a real choice.
+    expect(normalizeGame('forever')).toBe('forever');
+    expect(GAMES.forever.infix).toBe('forever');
+  });
+
+  it('builds all three of its namespaces', () => {
+    expect(buildNamespace('static', 'forever', 'us')).toBe('static-forever-us');
+    expect(buildNamespace('dynamic', 'forever', 'eu')).toBe('dynamic-forever-eu');
+    expect(buildNamespace('profile', 'forever', 'kr')).toBe('profile-forever-kr');
+  });
+
+  it('leaves PENDING_GAMES empty but still addressable', () => {
+    // Kept for the next unreleased flavour: entries there are reachable by
+    // buildNamespace but refused by normalizeGame.
+    expect(PENDING_GAMES).toEqual({});
+  });
+});
+
+describe('isRealmless', () => {
+  it('is true only for flavours whose characters have no realm', () => {
+    expect(isRealmless('forever')).toBe(true);
+    expect(isRealmless('FOREVER')).toBe(true);
+    expect(isRealmless(' forever ')).toBe(true);
+  });
+
+  it('is false for every realm-based flavour, and for nonsense', () => {
+    ['retail', 'classic', 'classic-era', 'anniversary'].forEach(game =>
+      expect(isRealmless(game)).toBe(false)
+    );
+    expect(isRealmless(null)).toBe(false);
+    expect(isRealmless('')).toBe(false);
+  });
+
+  it('agrees with REALMLESS_GAMES', () => {
+    [...REALMLESS_GAMES].forEach(game => expect(isRealmless(game)).toBe(true));
+  });
+});
+
+describe('unsupportedReason', () => {
+  it('explains why a feature cannot work, rather than just declining', () => {
+    // The text is user-facing: a command replies with it instead of failing.
+    expect(unsupportedReason('forever', 'token')).toContain('1.60.1');
+    expect(unsupportedReason('forever', 'arena')).toContain('Burning Crusade');
+    expect(unsupportedReason('forever', 'mythicplus')).toContain('Legion');
+  });
+
+  it('is null where the feature does work', () => {
+    expect(unsupportedReason('retail', 'token')).toBeNull();
+    expect(unsupportedReason('classic-era', 'arena')).toBeNull();
+  });
+
+  it('is null for an unknown game or feature', () => {
+    expect(unsupportedReason('forever', 'something-else')).toBeNull();
+    expect(unsupportedReason(null, 'token')).toBeNull();
+  });
+
+  it('declares a reason for every unsupported feature it lists', () => {
+    Object.values(UNSUPPORTED).forEach(features =>
+      Object.values(features).forEach(reason => {
+        expect(typeof reason).toBe('string');
+        expect(reason.length).toBeGreaterThan(20);
+      })
+    );
+  });
+});
+
+describe('namespace watch configuration', () => {
+  it('takes a probe character and lowercases it', () => {
+    const config = readConfig({ NAMESPACE_WATCH_CHARACTER: '  Judgement-Judy  ' });
+    expect(config.namespaceWatch.character).toBe('judgement-judy');
+  });
+
+  it('leaves the probe character null when unset, so that check is skipped', () => {
+    // There is no safe default: an invented name 404s under a healthy namespace
+    // exactly as it does under a broken one.
+    expect(readConfig({}).namespaceWatch.character).toBeNull();
   });
 });

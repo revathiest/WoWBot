@@ -323,3 +323,26 @@ describe('main characters', () => {
     expect(mainFor('nobody')).toBeNull();
   });
 });
+
+describe('characterKey on realmless flavours', () => {
+  it('uses the surname to tell same-named characters apart', () => {
+    // Forever has no realm, so without the surname both of these would key to
+    // the same character and their report lines would merge.
+    expect(characterKey({ name: 'Judgement', surname: 'Judy', realm: null })).not.toBe(
+      characterKey({ name: 'Judgement', surname: 'Smith', realm: null })
+    );
+  });
+
+  it('matches regardless of casing', () => {
+    expect(characterKey({ name: 'Judgement', surname: 'Judy', realm: null })).toBe(
+      characterKey({ name: 'judgement', surname: 'judy', realm: null })
+    );
+  });
+
+  it('leaves realm-based keys untouched when no surname is given', () => {
+    // Links written before Forever existed carry no surname and must still match.
+    expect(characterKey({ name: 'Butud', realm: 'Area 52' })).toBe(
+      characterKey({ name: 'Butud', realm: 'Area 52', surname: null })
+    );
+  });
+});

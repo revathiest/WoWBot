@@ -3,13 +3,13 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getCharacterProfile, getCharacterEquipment } = require('../../utils/blizzard/profile');
-const { resolveRealm } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const {
   addGameOption,
   addRealmOption,
   addRegionOption,
-  resolveRealmName,
+  addSurnameOption,
+  resolveCharacterTarget,
   resolveScope
 } = require('../../utils/commandOptions');
 const { auditEquipment } = require('../../utils/enchants');
@@ -27,6 +27,7 @@ const data = new SlashCommandBuilder()
   );
 
 addRealmOption(data);
+addSurnameOption(data);
 addGameOption(data);
 addRegionOption(data);
 
@@ -48,7 +49,13 @@ function buildEmbed({ profile, audit, scope, characterName, game }) {
 
   const embed = new EmbedBuilder()
     .setColor(profile ? classColor(profile.character_class?.name) : color)
-    .setTitle(`Enchant Audit — ${profile?.name ?? characterName} (${scope.label})`)
+    // Blizzard's casing beats what was typed, but only if it is the WHOLE name:
+    // a realmless profile splits it across `name` and `surname`.
+    .setTitle(
+      `Enchant Audit — ${
+        [profile?.name, profile?.surname].filter(Boolean).join(' ') || characterName
+      } (${scope.label})`
+    )
     .setDescription(verdict)
     .addFields(
       {
@@ -97,27 +104,27 @@ function buildEmbed({ profile, audit, scope, characterName, game }) {
 async function execute(interaction) {
   await interaction.deferReply();
 
-  const characterName = interaction.options.getString('character');
-  const realm = resolveRealmName(interaction);
   const scope = resolveScope(interaction);
 
-  if (!realm) {
-    await interaction.editReply(
-      '❌ No realm given, and no default realm is configured. Pass the `realm` option.'
-    );
+  const target = await resolveCharacterTarget({ interaction, scope });
+
+  if (target.error) {
+    await interaction.editReply(`❌ ${target.error}`);
     return;
   }
 
-  const target = await resolveRealm(realm, { region: scope.region, game: scope.game });
+  const { realmSlug, characterName, displayName } = target;
   const lookup = { region: scope.region, game: scope.game };
 
   let equipment;
   try {
-    equipment = await getCharacterEquipment(target.slug, characterName, lookup);
+    equipment = await getCharacterEquipment(realmSlug, characterName, lookup);
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
+      const where = target.realmLabel ? ` on **${target.realmLabel}**` : '';
+
       await interaction.editReply(
-        `❌ No character named **${characterName}** on **${target.name}** (${scope.label}).`
+        `❌ No character named **${displayName}**${where} (${scope.label}).`
       );
       return;
     }
@@ -125,7 +132,7 @@ async function execute(interaction) {
   }
 
   // The profile only supplies colour and item level, so a failure here is not fatal.
-  const profile = await getCharacterProfile(target.slug, characterName, lookup).catch(err => {
+  const profile = await getCharacterProfile(realmSlug, characterName, lookup).catch(err => {
     console.warn(`Could not load profile for ${characterName}: ${err.message}`);
     return null;
   });
@@ -134,13 +141,13 @@ async function execute(interaction) {
 
   if (audit.checked === 0) {
     await interaction.editReply(
-      `❌ **${characterName}** has nothing equipped that takes an enchant.`
+      `❌ **${displayName}** has nothing equipped that takes an enchant.`
     );
     return;
   }
 
   await interaction.editReply({
-    embeds: [buildEmbed({ profile, audit, scope, characterName, game: scope.game })]
+    embeds: [buildEmbed({ profile, audit, scope, characterName: displayName, game: scope.game })]
   });
 }
 

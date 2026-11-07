@@ -53,17 +53,66 @@ Keep these boundaries — the tests rely on them for mocking:
 ## Blizzard API gotchas
 
 - Namespaces are mandatory: `profile-{region}` for characters, `dynamic-{region}` for realms and the token, `static-{region}` for items.
+- **One flavour has no realms at all.** Classic Forever addresses characters as `{name}-{surname}` with no realm segment, and has rulesets where every other flavour has realms. Read the "Classic Forever" section below before touching anything that takes a realm.
 - Namespaces also carry the game version: `dynamic-classic-us`, `profile-classicann-us`. Build them with `buildNamespace` from `config/`; never concatenate by hand.
-- **A 403 does not mean a namespace is absent.** An invalid namespace and an unauthorised one return an identical generic `403 Forbidden`, so probing for namespace names proves nothing either way. `classicann` (TBC Anniversary) is undocumented in the API reference and was found only on Blizzard's API forum. If a realm seems missing, suspect a namespace you do not know about before concluding the data is unpublished.
-- **Never derive a realm slug when you can resolve one.** Use `resolveRealm` from `utils/blizzard/realms.js`, which matches against the live index. Blizzard deletes hyphens and apostrophes (`Azjol-Nerub` → `azjolnerub`) but keeps accents (`festung-der-stürme`), so the naive transformation is wrong for roughly a quarter of realms. `slugifyRealm` implements the verified rule and exists as the offline fallback.
+- **A 403 does not mean a namespace is absent.** An invalid namespace and an unauthorised one return an identical generic `403 Forbidden`, so a 403 proves nothing either way. `classicann` (TBC Anniversary) is undocumented in the API reference and was found only on Blizzard's API forum. If a realm seems missing, suspect a namespace you do not know about before concluding the data is unpublished.
+- **A 404 is different, and it is informative.** Measured 2026-11-06: an unrecognised namespace 403s (`zzqqxxnonsense`, `classic2x`, `classictbc`, `era`, `vanilla`, `hardcore`, `classic-forever`, and omitting the parameter), while an *accepted* namespace with no document at that path returns `404 BLZWEBAPI00000404` — the same thing `dynamic-us` plus a bogus realm slug returns. So a 404 is positive evidence the namespace exists. This is what identified `forever`.
+- **The 404 body splits it further.** A 404 with an EMPTY body means the route does not exist (`/data/wow/nonsense/index` under `dynamic-us`); a 404 carrying `BLZWEBAPI00000404` means the route and namespace are both real and there is simply no document there. Checking the body is sharper than checking the status.
+- **There is no discovery endpoint.** `/data/wow/`, `/data/wow/index`, `/data/` and `/` all 404, *including* under a namespace that definitely works, and there is no OpenAPI document under `us.api.blizzard.com` or `develop.battle.net`. "Which endpoints are live?" cannot be asked, only tested one known path at a time — which is why `utils/namespaceWatch/checks.js` is a hand-maintained list and must stay in step with the wrappers in `utils/blizzard/`.
+- **Never derive a realm slug when you can resolve one.** Use `resolveRealm` from `utils/blizzard/realms.js`, which matches against the live index — but reach for `resolveCharacterTarget`/`resolveRealmTarget` in `utils/commandOptions.js` from a command, since those also handle the realmless flavour. Blizzard deletes hyphens and apostrophes (`Azjol-Nerub` → `azjolnerub`) but keeps accents (`festung-der-stürme`), so the naive transformation is wrong for roughly a quarter of realms. `slugifyRealm` implements the verified rule and exists as the offline fallback.
 - Character names must be lowercased in paths — use `encodeCharacterName`.
-- **Endpoint wrappers take realm SLUGS, never names.** `slugifyRealm` is not idempotent: it deletes hyphens, so applying it to an existing slug turns `area-52` into `area52` and every request 404s. Resolve once with `resolveRealm`, then pass the slug down.
+- **Endpoint wrappers take realm SLUGS, never names.** `slugifyRealm` is not idempotent: it deletes hyphens, so applying it to an existing slug turns `area-52` into `area52` and every request 404s. Resolve once with `resolveRealm`, then pass the slug down. A **null** slug is meaningful: it tells `characterPath` and `guildPath` to omit the realm segment entirely.
 - Equipment payloads omit `level.value` on Classic and Anniversary; only retail supplies item levels. Render it conditionally.
 - Search endpoints return **localized maps** (`{ en_US: "..." }`) while direct document fetches return plain strings. Run anything user-visible through `localized()`.
 - Realm status and population live on the **connected realm**, not the realm document.
 - Mythic+ ratings are RGB component objects, not integers; `ratingColor()` packs them.
 - Currency values are in copper. `formatGold()` converts.
 
+## Classic Forever (realmless flavour)
+
+Classic Forever (`game: forever`, namespaces `static-forever-{region}` / `dynamic-forever-{region}` / `profile-forever-{region}`) does not have realms. It is the only supported flavour that works this way, and it is why several realm-shaped helpers now take a null realm. All of the below was measured against the live API on 2026-11-06.
+
+- **A character is ONE path segment: `{name}-{surname}`, lowercased.** `/profile/wow/character/judgement-judy` → 200, with `realm: null`, a `surname` field, and a `ruleset` of `{ id, name }`. Build the slug with `characterSlug` from `utils/wow.js` and pass the realm slug as **null** — `characterPath` then omits the realm segment. Never interpolate a realm yourself; writing the string `"null"` into a path is a bug that already happened once, in `pvp.js`.
+- **A guild is one segment too.** `/data/wow/guild/circle-of-lore` → 200, and `/roster` under it works. Same rule: `guildPath(null, slug)`.
+- **Rulesets replace realms.** `/data/wow/ruleset/index` → 200 with four: `1` PvP, `2` Normal, `3` Roleplay, `15` Roleplay PvP, each carrying a `status` and an `auctions` link. `utils/blizzard/rulesets.js` caches and resolves them, deliberately shaped like `realms.js`. A ruleset is **not** part of a character's address — it hangs off the profile as a property, so you never need one to look a character up. `/realm` and `/realms` report them so those commands have something true to say.
+- **The index gives ids only.** Ruleset index entries are `{ id, key.href }` — no name, no status — so listing them costs one request per ruleset. That is why the assembled list is what gets cached, not the index.
+- **The auction index needs a trailing slash.** `/data/wow/ruleset/{id}/auctions/` works; without the slash it 404s. Nothing else in this API behaves that way, so leave it alone.
+- **There are no realms, and there never will be.** `/data/wow/realm/index` and `/data/wow/connected-realm/index` 404, while `/data/wow/search/realm` returns **200 with `pageCount: 0`**. The realm collection is live and permanently empty, not unpublished — do not write anything that waits for it to fill.
+- **Characters appear only from level 10, and only after logging out.** So a 404 on a character you believe exists is usually one of those two, not a broken namespace. In a 33-member roster, 22 answered `pvp-summary` and the 11 that did not were all below level 10.
+- **All four regions serve it**, each with its own region id: 91 US, 93 EU, 92 KR, 94 TW. Characters are region-scoped — `judgement-judy` is EU and 404s in US.
+- **`active_spec` and `active_title` are always null**, and `titles` returns `{}`. Render them conditionally; `/character` already does.
+- **There is no armory page.** `armoryUrl` returns null when given no realm, because the site's character route has no realm-less shape. Callers must treat null as "no link" — `setURL(null)` throws.
+- **Wowhead has no Forever database.** `WOWHEAD_PATH.forever` points at `classic/`, which is correct: Forever is patch 1.60.1.
+
+### What cannot work, and why
+
+These are properties of the game, not gaps Blizzard will fill. `UNSUPPORTED` in `config/index.js` holds the user-facing reason for each, and the commands reply with it instead of failing:
+
+- **`/token`** — no WoW Token in vanilla; `/data/wow/token/index` 404s.
+- **`/arena`** — arena arrived in The Burning Crusade. `pvp-season/index` and `pvp-region/index` 404; `pvp-summary` carries only `honorable_kills` and `pvp_rank`, the vanilla honour system.
+- **`/mythicplus`** — keystones arrived in Legion. The endpoint 200s but returns only `current_period`, with no rating and no runs. The command is unaffected in practice because it hardcodes `game: 'retail'` and never switches version.
+- **`hunter-pets`** 404s, and auction item data is sparse.
+
+### Consequences for shared code
+
+- **`addRealmOption` is never `setRequired(true)`.** One slash-command definition is registered for every flavour, so marking realm required would make Discord demand one from the flavour that cannot use it. The requirement moved to `resolveCharacterTarget`, which can see the chosen game. The cost is that a missing realm is reported when the command runs rather than as you type.
+- **Use `resolveCharacterTarget` and `resolveRealmTarget`** from `utils/commandOptions.js` rather than calling `resolveRealm` in a command. They return either a ready-to-use target or a user-facing `error`, and they are the single place that knows two addressing shapes exist.
+- **`characterKey` and `memberKey` take a surname.** Without it two Forever characters sharing a first name collapse into one entry and their report lines merge. Omitting the surname reproduces the original name-only key, so links and snapshots written before Forever existed still match.
+- **A realmless link stores no realm.** `normalizeCharacter` refuses to fall back to `BLIZZARD_REALM` for these — that would key a character under a realm it is not on — and requires a surname instead.
+- **A configured home realm is meaningless here.** `/realm` reads its option directly rather than through `resolveRealmName`, because applying a realm name as a ruleset name could only ever fail.
+
+## Namespace watch
+
+Polls the `forever` namespace and posts to `#bot-activity-log` when an endpoint the bot depends on changes state. It was built to answer "can we support this yet?"; that is now answered, so what it catches is REGRESSIONS.
+
+- **One canary per capability the bot actually uses.** `static.playable-class`, `static.item`, `dynamic.region`, `dynamic.ruleset-index`, `profile.character`. The list is hand-maintained because there is no discovery endpoint, and it must stay in step with the wrappers in `utils/blizzard/`.
+- **It does not watch the realm index.** `/data/wow/realm/index` 404s permanently and `/data/wow/search/realm` answers with `pageCount: 0`, so a check on either could never go green and would read as a standing outage. It watches `dynamic.ruleset-index` instead.
+- **It does not watch `/token` or `pvp-season`.** Those cannot exist in 1.60.1 — see `UNSUPPORTED` in `config/index.js`. Polling them would report an outage forever.
+- **`empty` is a state of its own.** A 200 whose listing has no rows is not the same as a working endpoint; a check declares a `rows` counter and `stateForPayload` separates the two. An unrecognised payload shape stays `available`, so a Blizzard field rename cannot invent a regression.
+- **The character check needs a real character.** A name nobody owns 404s under a healthy namespace exactly as it does under a broken one, so there is no safe default. Set `NAMESPACE_WATCH_CHARACTER` to a real `{name}-{surname}` slug; unset, that one check reports `skipped`.
+- **The first poll never announces.** `lastCheckedAt: null` means "no baseline", and a fresh deployment must record the current state silently or standing the bot up would announce `static` as breaking news.
+- **`error`, `blocked` and `skipped` are never announced.** All three mean "we did not look", which is never news about the API. A watcher that narrates outages trains everyone to ignore the channel.
+- **`data/namespace-watch.json` is the reason restarts are quiet.** Same justification as `onboarding-warned.json`: without persistence, "announce on change" becomes "announce on every deploy".
 ## Spam detection
 
 - Detection is **signal counting, not scoring**: each check contributes one human-readable string, and the count is compared against a trust-tier requirement. Resist adding weights.

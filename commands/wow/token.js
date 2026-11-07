@@ -6,6 +6,7 @@ const { getWowTokenPrice } = require('../../utils/blizzard/gameData');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const { addGameOption, addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { discordTimestamp, formatGold } = require('../../utils/wow');
+const { unsupportedReason } = require('../../config');
 
 const GOLD_COLOR = 0xffd100;
 
@@ -34,6 +35,14 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   const scope = resolveScope(interaction);
+
+  // Known-absent flavours are answered without a request, and with the reason
+  // rather than a bare "there is no token here".
+  const unsupported = unsupportedReason(scope.game, 'token');
+  if (unsupported) {
+    await interaction.editReply(`❌ ${unsupported}`);
+    return;
+  }
 
   let token;
   try {

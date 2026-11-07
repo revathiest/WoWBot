@@ -1,7 +1,13 @@
 jest.mock('../../utils/blizzard/gameData', () => ({
   getRealm: jest.fn(),
   getConnectedRealm: jest.fn(),
-  getRealmIndex: jest.fn()
+  getRealmIndex: jest.fn(),
+  getRulesetAuctionIndex: jest.fn()
+}));
+
+jest.mock('../../utils/blizzard/rulesets', () => ({
+  getRulesets: jest.fn(),
+  findRuleset: jest.requireActual('../../utils/blizzard/rulesets').findRuleset
 }));
 
 jest.mock('../../utils/blizzard/realms', () => ({
@@ -11,7 +17,12 @@ jest.mock('../../utils/blizzard/realms', () => ({
   searchRealms: jest.requireActual('../../utils/blizzard/realms').searchRealms
 }));
 
-const { getRealm, getConnectedRealm } = require('../../utils/blizzard/gameData');
+const {
+  getRealm,
+  getConnectedRealm,
+  getRulesetAuctionIndex
+} = require('../../utils/blizzard/gameData');
+const { getRulesets } = require('../../utils/blizzard/rulesets');
 const { resolveRealm, getPlayableRealms, findRealmGames } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/realm');
@@ -166,5 +177,146 @@ describe('/realm', () => {
       .toJSON();
 
     expect(field(embed, 'Connected Realms')).toBeUndefined();
+  });
+});
+
+// Classic Forever has no realms. /realm reports rulesets instead, because that
+// is the nearest thing the flavour publishes — see utils/blizzard/rulesets.js.
+describe('/realm on Classic Forever', () => {
+  const RULESETS = [
+    { id: 2, name: 'Normal', slug: 'normal', status: 'UP', statusLabel: 'Up', auctionsHref: 'a/2' },
+    { id: 1, name: 'PvP', slug: 'pvp', status: 'UP', statusLabel: 'Up', auctionsHref: 'a/1' },
+    {
+      id: 15,
+      name: 'Roleplay PvP',
+      slug: 'roleplay-pvp',
+      status: 'DOWN',
+      statusLabel: 'Down',
+      auctionsHref: 'a/15'
+    }
+  ];
+
+  function foreverInteraction(overrides = {}) {
+    return createInteraction({
+      commandName: 'realm',
+      options: { game: 'forever', region: 'eu', ...overrides }
+    });
+  }
+
+  beforeEach(() => {
+    getRulesets.mockResolvedValue(RULESETS);
+    getRulesetAuctionIndex.mockResolvedValue({ auctions: new Array(15).fill({}) });
+  });
+
+  it('never touches the realm endpoints', async () => {
+    const target = foreverInteraction({ realm: 'Normal' });
+    await command.execute(target);
+
+    expect(getRealm).not.toHaveBeenCalled();
+    expect(getConnectedRealm).not.toHaveBeenCalled();
+    expect(resolveRealm).not.toHaveBeenCalled();
+  });
+
+  it('shows one ruleset with its status and auction houses', async () => {
+    const target = foreverInteraction({ realm: 'Normal' });
+    await command.execute(target);
+
+    const embed = replyEmbed(target);
+    expect(embed.title).toContain('Normal');
+    expect(field(embed, 'Status').value).toBe('Up');
+    expect(field(embed, 'Ruleset ID').value).toBe('2');
+    expect(field(embed, 'Auction Houses').value).toBe('15');
+  });
+
+  it('says plainly that there is no population to show', async () => {
+    const target = foreverInteraction({ realm: 'Normal' });
+    await command.execute(target);
+
+    // Somebody running /realm expected population and queue; the footer has to
+    // explain their absence rather than leave them wondering.
+    expect(replyEmbed(target).footer.text).toContain('population');
+  });
+
+  it('lists every ruleset when none is named', async () => {
+    const target = foreverInteraction();
+    await command.execute(target);
+
+    const embed = replyEmbed(target);
+    expect(embed.title).toContain('Rulesets');
+    expect(embed.description).toContain('Normal');
+    expect(embed.description).toContain('Roleplay PvP');
+  });
+
+  it('marks a ruleset that is down', async () => {
+    const target = foreverInteraction({ realm: 'Roleplay PvP' });
+    await command.execute(target);
+
+    expect(field(replyEmbed(target), 'Status').value).toBe('Down');
+  });
+
+  it('matches a ruleset by id as well as by name', async () => {
+    const target = foreverInteraction({ realm: '15' });
+    await command.execute(target);
+
+    expect(replyEmbed(target).title).toContain('Roleplay PvP');
+  });
+
+  it('names the available rulesets when the one asked for does not exist', async () => {
+    const target = foreverInteraction({ realm: 'Nonsense' });
+    await command.execute(target);
+
+    const reply = target.editReply.mock.calls[0][0];
+    expect(reply).toContain('Nonsense');
+    expect(reply).toContain('Normal');
+  });
+
+  it('still reports status when the auction lookup fails', async () => {
+    // Auction houses are an extra; losing them must not cost the status reply.
+    getRulesetAuctionIndex.mockRejectedValue(new Error('offline'));
+
+    const target = foreverInteraction({ realm: 'Normal' });
+    await command.execute(target);
+
+    const embed = replyEmbed(target);
+    expect(field(embed, 'Status').value).toBe('Up');
+    expect(embed.fields.some(entry => entry.name === 'Auction Houses')).toBe(false);
+  });
+
+  it('reports an unreadable ruleset list rather than throwing', async () => {
+    getRulesets.mockRejectedValue(new Error('offline'));
+
+    const target = foreverInteraction({ realm: 'Normal' });
+    await command.execute(target);
+
+    expect(target.editReply.mock.calls[0][0]).toContain('Could not read the ruleset list');
+  });
+
+  it('reports an empty ruleset list', async () => {
+    getRulesets.mockResolvedValue([]);
+
+    const target = foreverInteraction();
+    await command.execute(target);
+
+    expect(target.editReply.mock.calls[0][0]).toContain('No rulesets found');
+  });
+});
+
+describe('/realm ignores a home realm on Classic Forever', () => {
+  it('lists rulesets rather than treating BLIZZARD_REALM as a ruleset name', async () => {
+    // A configured home realm is a realm name. Applied as a ruleset it could
+    // only ever fail, so the realmless branch reads the option directly.
+    const { getRulesets } = require('../../utils/blizzard/rulesets');
+    getRulesets.mockResolvedValue([
+      { id: 2, name: 'Normal', slug: 'normal', status: 'UP', statusLabel: 'Up' }
+    ]);
+
+    const target = createInteraction({
+      commandName: 'realm',
+      options: { game: 'forever', region: 'eu' }
+    });
+
+    await command.execute(target);
+
+    expect(replyEmbed(target).title).toContain('Rulesets');
   });
 });

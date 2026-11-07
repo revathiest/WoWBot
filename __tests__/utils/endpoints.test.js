@@ -129,3 +129,94 @@ describe('game data endpoints', () => {
     expect(lastCall()[1].searchParams._page).toBe(3);
   });
 });
+
+describe('realmless endpoint paths', () => {
+  it('omits the realm segment for a Classic Forever character', () => {
+    // Forever addresses a character as one `{name}-{surname}` slug. Verified
+    // live: this exact path 200s under profile-forever-eu.
+    expect(profile.characterPath(null, 'judgement-judy')).toBe(
+      '/profile/wow/character/judgement-judy'
+    );
+  });
+
+  it('keeps the suffix on a realmless character path', () => {
+    expect(profile.characterPath(null, 'judgement-judy', '/equipment')).toBe(
+      '/profile/wow/character/judgement-judy/equipment'
+    );
+  });
+
+  it('preserves the separating hyphen in a realmless slug', () => {
+    // The hyphen is the separator between name and surname. Losing it, the way
+    // slugifyRealm would, makes every lookup 404.
+    expect(profile.characterPath(null, 'judgement-judy')).toContain('judgement-judy');
+  });
+
+  it('omits the realm segment for a Classic Forever guild', () => {
+    const guild = require('../../utils/blizzard/guild');
+
+    expect(guild.guildPath(null, 'circle-of-lore')).toBe('/data/wow/guild/circle-of-lore');
+    expect(guild.guildPath(null, 'circle-of-lore', '/roster')).toBe(
+      '/data/wow/guild/circle-of-lore/roster'
+    );
+  });
+
+  it('still builds the two-segment guild path when there is a realm', () => {
+    const guild = require('../../utils/blizzard/guild');
+
+    expect(guild.guildPath('area-52', 'some-guild')).toBe('/data/wow/guild/area-52/some-guild');
+  });
+});
+
+describe('ruleset endpoints', () => {
+  it('reads the ruleset index from the dynamic namespace', () => {
+    gameData.getRulesetIndex({ region: 'eu', game: 'forever' });
+
+    expect(lastCall()[0]).toBe('/data/wow/ruleset/index');
+    expect(lastCall()[1]).toMatchObject({ namespace: 'dynamic' });
+  });
+
+  it('reads one ruleset by id', () => {
+    gameData.getRuleset(15, { region: 'eu', game: 'forever' });
+
+    expect(lastCall()[0]).toBe('/data/wow/ruleset/15');
+  });
+
+  it('keeps the trailing slash on the auction index, which Blizzard requires', () => {
+    // Without it the endpoint 404s. Nothing else in this API behaves that way.
+    gameData.getRulesetAuctionIndex(1, { region: 'eu', game: 'forever' });
+
+    expect(lastCall()[0]).toBe('/data/wow/ruleset/1/auctions/');
+  });
+});
+
+describe('guild endpoints', () => {
+  const guild = require('../../utils/blizzard/guild');
+
+  it('requests a realm-based roster from the profile namespace', () => {
+    guild.getGuildRoster('area-52', 'some-guild', { region: 'us', game: 'retail' });
+
+    expect(lastCall()[0]).toBe('/data/wow/guild/area-52/some-guild/roster');
+    expect(lastCall()[1]).toMatchObject({ namespace: 'profile' });
+  });
+
+  it('requests a realm-based guild profile', () => {
+    guild.getGuild('area-52', 'some-guild', { region: 'us', game: 'retail' });
+
+    expect(lastCall()[0]).toBe('/data/wow/guild/area-52/some-guild');
+  });
+
+  it('drops the realm segment for a realmless guild', () => {
+    // Verified live: this path 200s under profile-forever-eu, and the guild
+    // reference inside a Forever character profile points at exactly this shape.
+    guild.getGuild(null, 'circle-of-lore', { region: 'eu', game: 'forever' });
+
+    expect(lastCall()[0]).toBe('/data/wow/guild/circle-of-lore');
+  });
+
+  it('drops the realm segment for a realmless roster', () => {
+    guild.getGuildRoster(null, 'circle-of-lore', { region: 'eu', game: 'forever' });
+
+    expect(lastCall()[0]).toBe('/data/wow/guild/circle-of-lore/roster');
+    expect(lastCall()[1]).toMatchObject({ namespace: 'profile', game: 'forever' });
+  });
+});

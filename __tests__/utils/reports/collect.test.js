@@ -123,7 +123,11 @@ describe('getClassNames', () => {
 describe('readRoster', () => {
   it('resolves a class id through the index', () => {
     const read = readRoster({ members: [member('Butud')] }, new Map([[4, 'Rogue']]));
-    expect(read).toEqual([{ name: 'Butud', level: 70, rank: 5, className: 'Rogue' }]);
+    // `surname` is null for every flavour except Classic Forever, which is the
+    // only one whose rosters carry one.
+    expect(read).toEqual([
+      { name: 'Butud', surname: null, level: 70, rank: 5, className: 'Rogue' }
+    ]);
   });
 
   it('prefers a class name when retail supplies one directly', () => {

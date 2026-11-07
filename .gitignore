@@ -16,5 +16,6 @@ logs/
 Thumbs.db
 .vscode/launch.json
 
-# Runtime data (spam settings, report config, character links, weekly snapshots)
+# Runtime data (spam settings, report config, character links, weekly snapshots,
+# namespace watch state)
 data/

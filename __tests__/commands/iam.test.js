@@ -177,7 +177,13 @@ describe('/iam remove', () => {
     const fake = interaction({ subcommand: 'remove', options: { character: 'Butud' } });
     await command.execute(fake);
 
-    expect(unlinkCharacter).toHaveBeenCalledWith('user-1', { name: 'Butud', realm: null });
+    expect(unlinkCharacter).toHaveBeenCalledWith('user-1', {
+      name: 'Butud',
+      realm: null,
+      // Narrows the match on realmless flavours, where two characters can share
+      // a first name.
+      surname: null
+    });
     expect(said(fake)).toContain('no longer linked');
   });
 
@@ -322,7 +328,11 @@ describe('/iam manage', () => {
 
     await command.execute(fake);
 
-    expect(unlinkCharacter).toHaveBeenCalledWith('user-9', { name: 'Butud', realm: null });
+    expect(unlinkCharacter).toHaveBeenCalledWith('user-9', {
+      name: 'Butud',
+      realm: null,
+      surname: null
+    });
     expect(said(fake)).toContain('<@user-9>');
   });
 
@@ -346,7 +356,7 @@ describe('/iam main', () => {
     const fake = interaction({ subcommand: 'main', options: { character: 'Alt' } });
     await command.execute(fake);
 
-    expect(setMain).toHaveBeenCalledWith('user-1', { name: 'Alt', realm: null });
+    expect(setMain).toHaveBeenCalledWith('user-1', { name: 'Alt', realm: null, surname: null });
     expect(said(fake)).toContain('your main');
   });
 

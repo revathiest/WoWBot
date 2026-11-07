@@ -17,7 +17,10 @@ const {
   resolveRealmName,
   resolveScope
 } = require('../../utils/commandOptions');
+const { getRulesets, findRuleset } = require('../../utils/blizzard/rulesets');
+const { getRulesetAuctionIndex } = require('../../utils/blizzard/gameData');
 const { idFromHref } = require('../../utils/wow');
+const { isRealmless } = require('../../config');
 
 const UP_COLOR = 0x43b581;
 const DOWN_COLOR = 0xf04747;
@@ -27,7 +30,9 @@ const data = new SlashCommandBuilder()
   .setName('realm')
   .setDescription('Show the status and population of a realm.');
 
-addRealmOption(data);
+addRealmOption(data, undefined, {
+  description: 'Realm name, or a Classic Forever ruleset (PvP, Normal, Roleplay). Omit to list all.'
+});
 addGameOption(data);
 addRegionOption(data);
 
@@ -77,11 +82,118 @@ async function suggestRealms(query, scope) {
   }
 }
 
+/**
+ * Classic Forever's answer to /realm.
+ *
+ * There is no realm and no connected realm, so there is no population or queue
+ * flag to report — a ruleset carries a name, an up/down status, and its own set
+ * of auction houses, and that is the whole of what this flavour publishes.
+ *
+ * With no ruleset named, every ruleset is listed: there are four, so the list is
+ * more useful than an error.
+ */
+function buildRulesetEmbed({ ruleset, scope, auctionHouses = null }) {
+  const isUp = ruleset.status === 'UP';
+
+  const embed = new EmbedBuilder()
+    .setColor(isUp ? UP_COLOR : DOWN_COLOR)
+    .setTitle(`${ruleset.name} (${scope.label})`)
+    .addFields(
+      { name: 'Status', value: ruleset.statusLabel ?? ruleset.status ?? '—', inline: true },
+      { name: 'Ruleset ID', value: String(ruleset.id), inline: true }
+    );
+
+  if (Number.isFinite(auctionHouses)) {
+    embed.addFields({ name: 'Auction Houses', value: String(auctionHouses), inline: true });
+  }
+
+  // Said plainly, because somebody running /realm expected population and queue.
+  embed.setFooter({
+    text:
+      'Classic Forever has rulesets instead of realms, so there is no population ' +
+      'or queue information to show.'
+  });
+
+  return embed;
+}
+
+function buildRulesetListEmbed({ rulesets, scope }) {
+  return new EmbedBuilder()
+    .setColor(UP_COLOR)
+    .setTitle(`Rulesets — ${scope.label}`)
+    .setDescription(
+      rulesets
+        .map(
+          ruleset =>
+            `${ruleset.status === 'UP' ? '🟢' : '🔴'} **${ruleset.name}** — ` +
+            `\`${ruleset.slug}\` · id ${ruleset.id}`
+        )
+        .join('\n')
+    )
+    .setFooter({ text: 'Classic Forever has rulesets instead of realms.' });
+}
+
+async function showRuleset(interaction, scope) {
+  // Read the option directly rather than through `resolveRealmName`: the
+  // configured BLIZZARD_REALM is a realm name, which is not a ruleset and would
+  // only ever produce "no ruleset called Nightslayer". There is nothing sensible
+  // to default to here, so no argument means "list them all".
+  const typed = (interaction.options?.getString?.('realm') ?? '').trim();
+  const lookup = { region: scope.region, game: scope.game };
+
+  let rulesets;
+  try {
+    rulesets = await getRulesets(lookup);
+  } catch (err) {
+    await interaction.editReply(`❌ Could not read the ruleset list: ${err.message}`);
+    return;
+  }
+
+  if (rulesets.length === 0) {
+    await interaction.editReply(`❌ No rulesets found for ${scope.label}.`);
+    return;
+  }
+
+  // No ruleset named: there are only a handful, so show them all.
+  if (!typed) {
+    await interaction.editReply({ embeds: [buildRulesetListEmbed({ rulesets, scope })] });
+    return;
+  }
+
+  const ruleset = findRuleset(rulesets, typed);
+
+  if (!ruleset) {
+    const names = rulesets.map(entry => `**${entry.name}**`).join(', ');
+    await interaction.editReply(
+      `❌ No ruleset called **${typed}** in ${scope.label}. Available: ${names}.`
+    );
+    return;
+  }
+
+  // Auction houses are a nice extra and the only other thing a ruleset exposes;
+  // a failure here must not cost the status reply.
+  let auctionHouses = null;
+  try {
+    const index = await getRulesetAuctionIndex(ruleset.id, lookup);
+    if (Array.isArray(index?.auctions)) auctionHouses = index.auctions.length;
+  } catch (err) {
+    console.warn(`Could not read auction houses for ruleset ${ruleset.id}: ${err.message}`);
+  }
+
+  await interaction.editReply({ embeds: [buildRulesetEmbed({ ruleset, scope, auctionHouses })] });
+}
+
 async function execute(interaction) {
   await interaction.deferReply();
 
   const realmName = resolveRealmName(interaction);
   const scope = resolveScope(interaction);
+
+  // Realmless flavours have rulesets where this command expects a realm.
+  if (isRealmless(scope.game)) {
+    await showRuleset(interaction, scope);
+    return;
+  }
 
   if (!realmName) {
     await interaction.editReply(
@@ -146,6 +258,9 @@ module.exports = {
   help: 'Shows a realm\'s status, population, type, and the realms it is connected to.',
   category: 'WoW',
   buildEmbed,
+  buildRulesetEmbed,
+  buildRulesetListEmbed,
   execute,
+  showRuleset,
   suggestRealms
 };

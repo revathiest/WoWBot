@@ -3,13 +3,12 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getGuildRoster, slugifyGuild } = require('../../utils/blizzard/guild');
-const { resolveRealm } = require('../../utils/blizzard/realms');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const {
   addGameOption,
   addRealmOption,
   addRegionOption,
-  resolveRealmName,
+  resolveRealmTarget,
   resolveScope
 } = require('../../utils/commandOptions');
 const { classColor, factionColor, formatNumber } = require('../../utils/wow');
@@ -122,31 +121,33 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   const guildName = interaction.options.getString('guild');
-  const realm = resolveRealmName(interaction);
   const scope = resolveScope(interaction);
 
-  if (!realm) {
-    await interaction.editReply(
-      '❌ No realm given, and no default realm is configured. Pass the `realm` option.'
-    );
+  // Realmless flavours (Classic Forever) address a guild by slug alone — see
+  // `guildPath` in utils/blizzard/guild.js.
+  const target = await resolveRealmTarget({ interaction, scope });
+
+  if (target.error) {
+    await interaction.editReply(`❌ ${target.error}`);
     return;
   }
 
-  const target = await resolveRealm(realm, { region: scope.region, game: scope.game });
   const guildSlug = slugifyGuild(guildName);
 
   // Max level differs per game version, and there is no endpoint for it, so take
   // the highest level actually present on the roster.
   let roster;
   try {
-    roster = await getGuildRoster(target.slug, guildSlug, {
+    roster = await getGuildRoster(target.realmSlug, guildSlug, {
       region: scope.region,
       game: scope.game
     });
   } catch (err) {
     if (err instanceof BlizzardApiError && err.isNotFound) {
+      const where = target.realmLabel ? ` on **${target.realmLabel}**` : '';
+
       await interaction.editReply(
-        `❌ No guild called **${guildName}** on **${target.name}** (${scope.label}).\n` +
+        `❌ No guild called **${guildName}**${where} (${scope.label}).\n` +
           `Looked for \`${guildSlug}\`. Guild names must be spelled as they appear in game, ` +
           'and there is no guild index to suggest near matches from.'
       );

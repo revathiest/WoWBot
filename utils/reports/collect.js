@@ -12,7 +12,8 @@ const { getPlayableClassIndex } = require('../blizzard/gameData');
 const { getGuildRoster, slugifyGuild } = require('../blizzard/guild');
 const { getCharacterPvpSummary, getCurrentSeasonId, getLeaderboard, BRACKETS } = require('../blizzard/pvp');
 const { resolveRealm } = require('../blizzard/realms');
-const { encodeCharacterName } = require('../wow');
+const { characterSlug, encodeCharacterName } = require('../wow');
+const { isRealmless } = require('../../config');
 const { buildSnapshot, memberKey } = require('./diff');
 
 // Blizzard allows 100 requests a second; this stays far under it while still
@@ -150,14 +151,24 @@ async function collectKills(members, { region, game, realmSlug, concurrency = KI
   let done = 0;
 
   await mapWithConcurrency(targets, concurrency, async member => {
+    const address = memberAddress(member, realmSlug);
+
+    // A realmless member with no surname cannot be addressed at all. Count it
+    // with the misses rather than firing a request that must 404.
+    if (!address) {
+      missing += 1;
+      done += 1;
+      return;
+    }
+
     try {
-      const summary = await getCharacterPvpSummary(realmSlug, encodeCharacterName(member.name), {
+      const summary = await getCharacterPvpSummary(address.realmSlug, address.characterName, {
         region,
         game
       });
 
       if (Number.isFinite(summary?.honorable_kills)) {
-        kills.set(memberKey(member.name), summary.honorable_kills);
+        kills.set(memberKey(member.name, member.surname), summary.honorable_kills);
       }
     } catch (err) {
       if (err?.status === 404) missing += 1;
@@ -182,6 +193,9 @@ function readRoster(roster, classNames) {
   return (roster?.members ?? [])
     .map(member => ({
       name: member.character?.name,
+      // Classic Forever only: the other half of the name, and the only thing
+      // that tells two same-named roster members apart.
+      surname: member.character?.surname ?? null,
       level: member.character?.level,
       rank: member.rank,
       // Roster entries carry an id and, on retail only, a name.
@@ -194,13 +208,34 @@ function readRoster(roster, classNames) {
 }
 
 /**
+ * How to address one roster member in a profile request.
+ *
+ * Mirrors `resolveCharacterTarget` for code that has a roster rather than an
+ * interaction. Returns null when a realmless member has no surname, which would
+ * make an unanswerable request — the caller counts that as a miss.
+ */
+function memberAddress(member, realmSlug) {
+  if (realmSlug) {
+    return { realmSlug, characterName: encodeCharacterName(member.name) };
+  }
+
+  const slug = characterSlug(member.name, member.surname);
+
+  return slug ? { realmSlug: null, characterName: slug } : null;
+}
+
+/**
  * Builds one guild's snapshot.
  *
  * @returns {Promise<{snapshot: object, warnings: string[], realmSlug: string, guildSlug: string}>}
  */
 async function collectSnapshot(guild, { capturedAt = Date.now(), concurrency, onProgress, includeKills = true } = {}) {
   const { region, game } = guild;
-  const realm = await resolveRealm(guild.realm, { region, game });
+  // Classic Forever has no realms: the guild and every character in it are
+  // addressed by slug alone, and a null slug is what the path builders want.
+  const realm = isRealmless(game)
+    ? { slug: null, name: null, resolved: true }
+    : await resolveRealm(guild.realm, { region, game });
   const guildSlug = slugifyGuild(guild.name);
   const warnings = [];
 
@@ -257,8 +292,8 @@ async function collectSnapshot(guild, { capturedAt = Date.now(), concurrency, on
     capturedAt,
     members: members.map(member => ({
       ...member,
-      kills: kills.get(memberKey(member.name)) ?? null,
-      brackets: standings.get(memberKey(member.name)) ?? {}
+      kills: kills.get(memberKey(member.name, member.surname)) ?? null,
+      brackets: standings.get(memberKey(member.name, member.surname)) ?? {}
     }))
   });
 

@@ -14,7 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { normalizeGame, normalizeRegion, readConfig } = require('../../config');
+const { isRealmless, normalizeGame, normalizeRegion, readConfig } = require('../../config');
 const { realmMatchKey } = require('../wow');
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
@@ -32,22 +32,41 @@ let cache = null;
  * typed, so both go through `realmMatchKey`, which folds accents and drops
  * separators. "Area 52" and "area-52" collapse to the same key.
  */
-function characterKey({ name, realm }) {
-  return `${realmMatchKey(realm)}:${String(name ?? '').trim().toLowerCase()}`;
+function characterKey({ name, realm, surname = null }) {
+  // Realmless flavours (Classic Forever) have an empty realm half, so the
+  // surname is what keeps two same-named characters apart. Flavours with realms
+  // pass no surname and keep their original `realm:name` key, which is why
+  // links stored before Forever existed still match.
+  const who = [name, surname]
+    .filter(Boolean)
+    .map(part => String(part).trim().toLowerCase())
+    .join('-');
+
+  return `${realmMatchKey(realm)}:${who}`;
 }
 
 function normalizeCharacter(raw, config = readConfig()) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const name = String(source.name ?? '').trim();
-  const realm = String(source.realm ?? '').trim() || config.blizzard.realm;
+  const game = normalizeGame(source.game) ?? config.blizzard.game;
+  const surname = String(source.surname ?? '').trim() || null;
 
-  if (!name || !realm) return null;
+  // A realmless character has no realm to fall back to, and must not inherit
+  // the configured home realm — that would key it under a realm it is not on.
+  // Its surname is mandatory instead, for the same reason a realm is elsewhere:
+  // without it the character cannot be addressed or matched.
+  const realmless = isRealmless(game);
+  const realm = realmless ? null : String(source.realm ?? '').trim() || config.blizzard.realm;
+
+  if (!name) return null;
+  if (realmless ? !surname : !realm) return null;
 
   return {
     name,
+    surname,
     realm,
     region: normalizeRegion(source.region) ?? config.blizzard.region,
-    game: normalizeGame(source.game) ?? config.blizzard.game,
+    game,
     // The character this person is known by: it sets their nickname, and it
     // is what makes them count as ONE person rather than one per alt.
     main: Boolean(source.main)
@@ -197,19 +216,25 @@ function linkCharacter(userId, raw, { force = false } = {}) {
   };
 }
 
-/** Unlinks one character. Realm narrows the match when names collide. */
-function unlinkCharacter(userId, { name, realm = null }) {
+/**
+ * Unlinks one character. Realm narrows the match when names collide, and on
+ * realmless flavours the surname does the same job — without it, somebody with
+ * two Forever characters sharing a first name would lose both at once.
+ */
+function unlinkCharacter(userId, { name, realm = null, surname = null }) {
   const id = String(userId ?? '').trim();
   const links = loadLinks();
   const existing = links[id] ?? [];
 
   const nameKey = String(name ?? '').trim().toLowerCase();
   const realmKey = realm ? realmMatchKey(realm) : null;
+  const surnameKey = surname ? String(surname).trim().toLowerCase() : null;
 
   const remaining = existing.filter(
     entry =>
       entry.name.toLowerCase() !== nameKey ||
-      (realmKey !== null && realmMatchKey(entry.realm) !== realmKey)
+      (realmKey !== null && realmMatchKey(entry.realm) !== realmKey) ||
+      (surnameKey !== null && String(entry.surname ?? '').toLowerCase() !== surnameKey)
   );
 
   if (remaining.length === existing.length) {
@@ -232,17 +257,19 @@ function mainFor(userId) {
  *
  * @returns {{changed: boolean, reason: string|null, main: object|null}}
  */
-function setMain(userId, { name, realm = null }) {
+function setMain(userId, { name, realm = null, surname = null }) {
   const id = String(userId ?? '').trim();
   const links = loadLinks();
   const existing = links[id] ?? [];
 
   const nameKey = String(name ?? '').trim().toLowerCase();
   const realmKey = realm ? realmMatchKey(realm) : null;
+  const surnameKey = surname ? String(surname).trim().toLowerCase() : null;
 
   const matches = character =>
     character.name.toLowerCase() === nameKey &&
-    (realmKey === null || realmMatchKey(character.realm) === realmKey);
+    (realmKey === null || realmMatchKey(character.realm) === realmKey) &&
+    (surnameKey === null || String(character.surname ?? '').toLowerCase() === surnameKey);
 
   const target = existing.find(matches);
 

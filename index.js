@@ -18,6 +18,7 @@ const ticketStore = require('./utils/tickets/store');
 const { ensureLobbyMessage } = require('./utils/tickets/core');
 const { refreshAll: refreshHelpPosts } = require('./utils/help/post');
 const { loadConfig: loadAuditConfig } = require('./utils/audit/config');
+const { startNamespaceWatcher } = require('./utils/namespaceWatch/watcher');
 const { describeGuilds, guildScopeWarnings, isGuildInScope } = require('./utils/guildScope');
 
 const config = readConfig();
@@ -149,6 +150,11 @@ client.once(Events.ClientReady, async readyClient => {
       ? `   Audit log: 📝 on (${audit.verbosity})`
       : '   Audit log: ⚪ off — /auditlog channel, then /auditlog enabled value:true'
   );
+
+  // Polls the unreleased `forever` namespace and announces when an endpoint the
+  // bot would use starts answering. Started last because it is the least
+  // important thing here, and logs its own status line either way.
+  startNamespaceWatcher(readyClient, { config });
 });
 
 client.on(Events.Error, err => console.error('Discord client error:', err));

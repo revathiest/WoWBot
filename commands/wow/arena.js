@@ -17,6 +17,7 @@ const {
   resolveScope
 } = require('../../utils/commandOptions');
 const { formatNumber, FALLBACK_COLOR } = require('../../utils/wow');
+const { unsupportedReason } = require('../../config');
 
 const ARENA_COLOR = 0xc41e3a;
 const DEFAULT_LIMIT = 10;
@@ -226,6 +227,15 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   const scope = resolveScope(interaction);
+
+  // Some flavours have no arena at all. Say so up front rather than asking for
+  // a realm first and then reporting a missing season — the user would be left
+  // thinking they had typed something wrong.
+  const unsupported = unsupportedReason(scope.game, 'arena');
+  if (unsupported) {
+    await interaction.editReply(`❌ ${unsupported}`);
+    return;
+  }
 
   if (interaction.options.getSubcommand() === 'rank') {
     await showRank(interaction, scope);

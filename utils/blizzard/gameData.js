@@ -15,6 +15,34 @@ function getRealmIndex(options = {}) {
 }
 
 /**
+ * Every ruleset id in the region. Rulesets are Classic Forever's replacement for
+ * realms, and this is the only index it publishes — `/data/wow/realm/index` 404s
+ * there permanently.
+ *
+ * The entries carry ONLY `{ id, key.href }`: no name, no status. Listing them
+ * with names therefore costs one request per ruleset, which is why
+ * `utils/blizzard/rulesets.js` caches the assembled list rather than the index.
+ */
+function getRulesetIndex(options = {}) {
+  return request('/data/wow/ruleset/index', { ...options, namespace: 'dynamic' });
+}
+
+/** A single ruleset: id, name, up/down status, and its auction-house link. */
+function getRuleset(rulesetId, options = {}) {
+  return request(`/data/wow/ruleset/${rulesetId}`, { ...options, namespace: 'dynamic' });
+}
+
+/**
+ * Auction houses for one ruleset.
+ *
+ * The trailing slash is REQUIRED — without it Blizzard 404s. That is not a
+ * convention anywhere else in this API, so leave it alone.
+ */
+function getRulesetAuctionIndex(rulesetId, options = {}) {
+  return request(`/data/wow/ruleset/${rulesetId}/auctions/`, { ...options, namespace: 'dynamic' });
+}
+
+/**
  * A single realm: type, timezone, category, and its connected-realm reference.
  * Takes an already-resolved slug — see the note in profile.js on why this must
  * not slugify again.
@@ -80,6 +108,9 @@ module.exports = {
   getPlayableClassIndex,
   getRealm,
   getRealmIndex,
+  getRuleset,
+  getRulesetAuctionIndex,
+  getRulesetIndex,
   getWowTokenPrice,
   searchItems
 };

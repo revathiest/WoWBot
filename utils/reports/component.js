@@ -225,6 +225,9 @@ async function handleComponent(interaction) {
   const realmSlug = snapshot.guild?.realmSlug ?? snapshot.guild?.realm;
   const members = Object.values(snapshot.members ?? {}).map(member => ({
     name: member.name,
+    // Carried through so realmless characters still match their links — the
+    // surname is half of their identity. Null everywhere else.
+    surname: member.surname ?? null,
     level: member.level,
     className: member.className
   }));

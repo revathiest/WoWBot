@@ -149,3 +149,62 @@ describe('character PvP endpoints', () => {
     expect(lastCall()[0]).toBe('/profile/wow/character/nightslayer/zuggbeard/pvp-bracket/3v3');
   });
 });
+
+describe('PvP paths on realmless flavours', () => {
+  it('drops the realm segment instead of writing "null" into the path', async () => {
+    // Regression: these two built their paths by hand, so a null realm produced
+    // /profile/wow/character/null/... and every honorable-kill lookup in the
+    // weekly report 404'd on Classic Forever.
+    request.mockResolvedValue({ honorable_kills: 7 });
+
+    await getCharacterPvpSummary(null, 'judgement-judy', { region: 'eu', game: 'forever' });
+
+    expect(request).toHaveBeenCalledWith(
+      '/profile/wow/character/judgement-judy/pvp-summary',
+      expect.objectContaining({ namespace: 'profile' })
+    );
+  });
+
+  it('does the same for a bracket lookup', async () => {
+    request.mockResolvedValue({});
+
+    await getCharacterPvpBracket(null, 'judgement-judy', '2v2', {
+      region: 'eu',
+      game: 'forever'
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      '/profile/wow/character/judgement-judy/pvp-bracket/2v2',
+      expect.objectContaining({ namespace: 'profile' })
+    );
+  });
+
+  it('still builds the realm form when there is a realm', async () => {
+    request.mockResolvedValue({});
+
+    await getCharacterPvpSummary('area-52', 'thrall', { region: 'us', game: 'retail' });
+
+    expect(request).toHaveBeenCalledWith(
+      '/profile/wow/character/area-52/thrall/pvp-summary',
+      expect.objectContaining({ namespace: 'profile' })
+    );
+  });
+});
+
+describe('getCurrentSeasonId where there are no seasons', () => {
+  it('returns null for a 404, because that means the version has no arena', () => {
+    // Classic Forever is patch 1.60.1: /data/wow/pvp-season/index 404s. Letting
+    // that throw crashed the whole weekly report.
+    const notFound = Object.assign(new Error('Not found.'), { status: 404 });
+    request.mockRejectedValue(notFound);
+
+    return expect(getCurrentSeasonId({ region: 'eu', game: 'forever' })).resolves.toBeNull();
+  });
+
+  it('still throws on a server error, which is not the same as having no seasons', () => {
+    const boom = Object.assign(new Error('Blizzard API returned 500.'), { status: 500 });
+    request.mockRejectedValue(boom);
+
+    return expect(getCurrentSeasonId({ region: 'us', game: 'retail' })).rejects.toThrow('500');
+  });
+});

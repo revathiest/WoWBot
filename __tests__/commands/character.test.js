@@ -81,13 +81,17 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('/character definition', () => {
-  it('requires only a character once a home realm is configured', () => {
+  it('requires only a character name', () => {
     const json = command.data.toJSON();
 
     expect(json.name).toBe('character');
+    // `realm` is never required: one definition serves every flavour, and
+    // Classic Forever has no realms. `surname` is how a Forever character is
+    // identified instead. Both are validated at run time, not by Discord.
     expect(json.options.map(option => [option.name, option.required])).toEqual([
       ['character', true],
       ['realm', false],
+      ['surname', false],
       ['game', false],
       ['region', false]
     ]);

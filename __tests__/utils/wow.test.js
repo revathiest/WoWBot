@@ -233,3 +233,70 @@ describe('REGION_CHOICES', () => {
     ]);
   });
 });
+
+describe('characterSlug', () => {
+  it('builds the realmless Classic Forever address', () => {
+    expect(wow.characterSlug('Judgement', 'Judy')).toBe('judgement-judy');
+  });
+
+  it('keeps accents, because Blizzard does', () => {
+    expect(wow.characterSlug('Élodie', 'Stürm')).toBe('élodie-stürm');
+  });
+
+  it('strips punctuation inside each half, so the hyphen stays the only separator', () => {
+    expect(wow.characterSlug("Mal'Ganis", 'Van-Cleef')).toBe('malganis-vancleef');
+  });
+
+  it('returns null without a surname, rather than a half address', () => {
+    // A Forever character has no realm, so the surname is what makes the name
+    // unique. A one-word address could never match.
+    expect(wow.characterSlug('Judgement', '')).toBeNull();
+    expect(wow.characterSlug('Judgement', null)).toBeNull();
+    expect(wow.characterSlug('', 'Judy')).toBeNull();
+  });
+});
+
+describe('splitCharacterName', () => {
+  it('splits every shape people actually type', () => {
+    expect(wow.splitCharacterName('Judgement-Judy')).toEqual({
+      name: 'Judgement',
+      surname: 'Judy'
+    });
+    expect(wow.splitCharacterName('Judgement Judy')).toEqual({
+      name: 'Judgement',
+      surname: 'Judy'
+    });
+  });
+
+  it('reports a missing surname as null so the caller can ask for one', () => {
+    expect(wow.splitCharacterName('Judgement')).toEqual({ name: 'Judgement', surname: null });
+    expect(wow.splitCharacterName('')).toEqual({ name: null, surname: null });
+  });
+
+  it('does not split on letters that merely look like escapes', () => {
+    // Guards a real bug: a damaged character class once split on the letter "s".
+    expect(wow.splitCharacterName('Sassy Smith')).toEqual({ name: 'Sassy', surname: 'Smith' });
+  });
+
+  it('folds anything past the second word into the surname', () => {
+    expect(wow.splitCharacterName('Judgement Judy Smith')).toEqual({
+      name: 'Judgement',
+      surname: 'Judy Smith'
+    });
+  });
+});
+
+describe('armoryUrl for realmless flavours', () => {
+  it('returns null when there is no realm, because the armory has no such page', () => {
+    // Callers must treat null as "no link" — setting a null URL on an embed
+    // button throws.
+    expect(wow.armoryUrl({ region: 'eu', realmSlug: null, characterName: 'judgement-judy' }))
+      .toBeNull();
+  });
+});
+
+describe('wowheadItemUrl for Classic Forever', () => {
+  it('uses the vanilla database, since Forever is patch 1.60.1', () => {
+    expect(wow.wowheadItemUrl(19019, 'forever')).toBe('https://www.wowhead.com/classic/item=19019');
+  });
+});

@@ -7,6 +7,7 @@
 // expiry compared against Date.now(), never a timer, so tests can fast-forward.
 
 const { request } = require('./client');
+const { characterPath } = require('./profile');
 const { DEFAULT_GAME, DEFAULT_REGION } = require('../../config');
 
 // Ladders move slowly; a few minutes of staleness is invisible to users and
@@ -32,9 +33,25 @@ function getPvpSeasonIndex(options = {}) {
   return request('/data/wow/pvp-season/index', { ...options, namespace: 'dynamic' });
 }
 
-/** Resolves the current season id, so commands never hardcode one. */
+/**
+ * Resolves the current season id, so commands never hardcode one.
+ *
+ * Returns null when the game version has no PvP seasons at all, which callers
+ * already treat as "no arena section". A 404 here means exactly that: Classic
+ * Forever is patch 1.60.1, where arena did not exist, and its
+ * `/data/wow/pvp-season/index` 404s. Only the 404 is swallowed — a 5xx still
+ * throws, because "Blizzard is broken" must not be reported as "no seasons".
+ */
 async function getCurrentSeasonId(options = {}) {
-  const index = await getPvpSeasonIndex(options);
+  let index;
+
+  try {
+    index = await getPvpSeasonIndex(options);
+  } catch (err) {
+    if (err?.status === 404) return null;
+    throw err;
+  }
+
   const current = index?.current_season?.id;
 
   if (Number.isFinite(current)) return current;
@@ -68,7 +85,11 @@ async function getLeaderboard(seasonId, bracket, options = {}) {
 
 /** Honorable kills and the brackets a character is ranked in. */
 function getCharacterPvpSummary(realmSlug, characterName, options = {}) {
-  return request(`/profile/wow/character/${realmSlug}/${characterName}/pvp-summary`, {
+  // Built with `characterPath` rather than by hand, so a realmless flavour drops
+  // the realm segment instead of putting the string "null" in the path. That
+  // exact bug made every honorable-kill lookup in the weekly report 404 on
+  // Classic Forever.
+  return request(characterPath(realmSlug, characterName, '/pvp-summary'), {
     ...options,
     namespace: 'profile'
   });
@@ -76,7 +97,7 @@ function getCharacterPvpSummary(realmSlug, characterName, options = {}) {
 
 /** One bracket's standing for a character. */
 function getCharacterPvpBracket(realmSlug, characterName, bracket, options = {}) {
-  return request(`/profile/wow/character/${realmSlug}/${characterName}/pvp-bracket/${bracket}`, {
+  return request(characterPath(realmSlug, characterName, `/pvp-bracket/${bracket}`), {
     ...options,
     namespace: 'profile'
   });

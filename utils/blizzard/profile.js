@@ -10,10 +10,23 @@ const { encodeCharacterName } = require('../wow');
  * Do not slugify here. Blizzard's rule deletes hyphens, so applying it to a slug
  * that already contains one destroys it ("area-52" -> "area52") and every lookup
  * 404s. Callers resolve names to slugs with `resolveRealm` first.
+ *
+ * Pass a FALSY realmSlug for a realmless flavour (Classic Forever). The realm
+ * segment is then omitted entirely and `characterName` is the whole address —
+ * the `{name}-{surname}` slug from `characterSlug`, not a bare first name:
+ *
+ *   realm:     /profile/wow/character/area-52/thrall
+ *   realmless: /profile/wow/character/judgement-judy
+ *
+ * Both shapes are real routes. Verified 2026-11-06: the realmless form 200s
+ * under `profile-forever-eu` and the realm form 404s there, because Forever
+ * publishes no realms at all.
  */
 function characterPath(realmSlug, characterName, suffix = '') {
   const name = encodeCharacterName(characterName);
-  return `/profile/wow/character/${realmSlug}/${name}${suffix}`;
+  const base = realmSlug ? `${realmSlug}/${name}` : name;
+
+  return `/profile/wow/character/${base}${suffix}`;
 }
 
 /** Character summary: level, class, spec, guild, item level, achievement points. */

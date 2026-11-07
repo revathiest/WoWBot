@@ -8,12 +8,13 @@ const {
   getCharacterEquipment
 } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
-const { findRealmGames, resolveRealm } = require('../../utils/blizzard/realms');
+const { findRealmGames } = require('../../utils/blizzard/realms');
 const {
   addGameOption,
   addRealmOption,
   addRegionOption,
-  resolveRealmName,
+  addSurnameOption,
+  resolveCharacterTarget,
   resolveScope
 } = require('../../utils/commandOptions');
 const {
@@ -46,6 +47,7 @@ const data = new SlashCommandBuilder()
   );
 
 addRealmOption(data);
+addSurnameOption(data);
 addGameOption(data);
 addRegionOption(data);
 
@@ -106,10 +108,23 @@ function buildEmbed({ profile, media, equipment, region, realmSlug, characterNam
   const className = profile.character_class?.name;
   const specAndClass = [specName, className].filter(Boolean).join(' ') || 'Unknown';
 
+  // Realmless flavours (Classic Forever) carry a surname and a ruleset where
+  // every other flavour carries a realm. Both are the character's "where", so
+  // they occupy the same spot in the title.
+  const fullName = [profile.name, profile.surname].filter(Boolean).join(' ');
+  const place = profile.realm?.name ?? profile.ruleset?.name ?? realmSlug ?? null;
+  const where = place ? ` — ${place}` : '';
+
   const embed = new EmbedBuilder()
     .setColor(classColor(className))
-    .setTitle(`${profile.name} — ${profile.realm?.name ?? realmSlug} (${scopeLabel ?? region.toUpperCase()})`)
-    .setURL(armoryUrl({ region, realmSlug, characterName }))
+    .setTitle(`${fullName}${where} (${scopeLabel ?? region.toUpperCase()})`);
+
+  // Classic Forever has no armory page, so there is no URL to attach. Setting a
+  // null URL throws, which is why this is a guard and not a fallback.
+  const armory = armoryUrl({ region, realmSlug, characterName });
+  if (armory) embed.setURL(armory);
+
+  embed
     .addFields(
       { name: 'Level', value: String(profile.level ?? '—'), inline: true },
       { name: 'Race', value: profile.race?.name ?? '—', inline: true },
@@ -160,20 +175,19 @@ function buildEmbed({ profile, media, equipment, region, realmSlug, characterNam
 async function execute(interaction) {
   await interaction.deferReply();
 
-  const characterName = interaction.options.getString('character');
-  const realm = resolveRealmName(interaction);
   const scope = resolveScope(interaction);
   const { region, game } = scope;
 
-  if (!realm) {
-    await interaction.editReply(
-      '❌ No realm given, and no default realm is configured. Pass the `realm` option.'
-    );
+  // One resolver for both addressing shapes: a realm slug plus a name, or a
+  // realmless `{name}-{surname}` slug. See utils/commandOptions.js.
+  const target = await resolveCharacterTarget({ interaction, scope });
+
+  if (target.error) {
+    await interaction.editReply(`❌ ${target.error}`);
     return;
   }
 
-  const target = await resolveRealm(realm, { region, game });
-  const realmSlug = target.slug;
+  const { realmSlug, characterName, displayName, realmQuery: realm } = target;
 
   let profile;
   try {
@@ -195,6 +209,17 @@ async function execute(interaction) {
         }
       }
 
+      if (!realmSlug) {
+        // Realmless flavours have no realm to blame, and a different set of
+        // reasons a real character can be missing.
+        await interaction.editReply(
+          `❌ No character named **${displayName}** (${scope.label}).\n` +
+            `Checked \`${characterName}\`. Characters appear only from level 10, and only ` +
+            'once they have logged out, so a brand-new character will not be found yet.'
+        );
+        return;
+      }
+
       await interaction.editReply(
         `❌ No character named **${characterName}** on **${realm}** (${scope.label}).\n` +
           `Checked realm slug \`${realmSlug}\`. Characters below level 10 and recently ` +
@@ -208,11 +233,11 @@ async function execute(interaction) {
   // Artwork and gear are extras; neither failing should sink the whole reply.
   const [media, equipment] = await Promise.all([
     getCharacterMedia(realmSlug, characterName, { region, game }).catch(err => {
-      console.warn(`Could not load media for ${characterName}-${realmSlug}: ${err.message}`);
+      console.warn(`Could not load media for ${target.characterName}: ${err.message}`);
       return null;
     }),
     getCharacterEquipment(realmSlug, characterName, { region, game }).catch(err => {
-      console.warn(`Could not load equipment for ${characterName}-${realmSlug}: ${err.message}`);
+      console.warn(`Could not load equipment for ${target.characterName}: ${err.message}`);
       return null;
     })
   ]);

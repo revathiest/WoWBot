@@ -84,6 +84,58 @@ function encodeCharacterName(name) {
   return encodeURIComponent(String(name ?? '').trim().toLowerCase());
 }
 
+/**
+ * One part of a Classic Forever character slug.
+ *
+ * Same rule as `slugifyRealm` minus the space handling: lowercase, then delete
+ * everything that is not a letter or digit. Accents are KEPT, because Blizzard
+ * keeps them in slugs elsewhere and there is no reason to think names differ.
+ */
+function characterNamePart(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+/**
+ * Builds the Classic Forever character slug: `{name}-{surname}`, lowercased.
+ *
+ * Forever characters have no realm — the surname is what makes a name unique, so
+ * it is NOT optional. Returns null when either half is missing, so the caller
+ * can ask for a surname rather than requesting a path that cannot match.
+ *
+ * The hyphen is the separator, which is why each half has its own punctuation
+ * stripped first: a hyphen surviving inside a half would split the slug twice.
+ */
+function characterSlug(name, surname) {
+  const first = characterNamePart(name);
+  const last = characterNamePart(surname);
+
+  if (!first || !last) return null;
+
+  return `${first}-${last}`;
+}
+
+/**
+ * Splits what someone typed into `{ name, surname }`.
+ *
+ * Accepts all three shapes people actually use: "Judgement Judy",
+ * "Judgement-Judy", and a bare "Judgement" (surname null, so the caller can say
+ * what is missing). Anything past the second word folds into the surname, where
+ * `characterNamePart` will strip the space back out.
+ */
+function splitCharacterName(value) {
+  const parts = String(value ?? '')
+    .trim()
+    .split(/[\s-]+/)
+    .filter(Boolean);
+
+  return {
+    name: parts[0] ?? null,
+    surname: parts.length > 1 ? parts.slice(1).join(' ') : null
+  };
+}
+
 function titleCase(value) {
   return String(value ?? '')
     .split(/[\s-]+/)
@@ -161,6 +213,12 @@ function formatDuration(ms) {
  * only in that the Americas armory lives under /en-us.
  */
 function armoryUrl({ region, realmSlug, characterName }) {
+  // Realmless flavours (Classic Forever) have no armory page: the site's
+  // character route is /character/{region}/{realm}/{name}, with no shape that
+  // omits the realm. Callers must treat null as "no link" rather than building
+  // a URL with "undefined" in it — see how /character guards the button.
+  if (!realmSlug) return null;
+
   const localePath = { us: 'en-us', eu: 'en-gb', kr: 'ko-kr', tw: 'zh-tw' }[region] ?? 'en-us';
   return `https://worldofwarcraft.blizzard.com/${localePath}/character/${region}/${realmSlug}/${encodeCharacterName(characterName)}`;
 }
@@ -173,7 +231,10 @@ const WOWHEAD_PATH = {
   retail: '',
   anniversary: 'tbc/',
   classic: 'mop-classic/',
-  'classic-era': 'classic/'
+  'classic-era': 'classic/',
+  // Wowhead has no Classic Forever database. Forever is patch 1.60.1, so the
+  // vanilla database is the correct one for its item ids.
+  forever: 'classic/'
 };
 
 function wowheadItemUrl(itemId, game = 'retail') {
@@ -208,6 +269,8 @@ module.exports = {
   FALLBACK_COLOR,
   REGION_CHOICES,
   armoryUrl,
+  characterNamePart,
+  characterSlug,
   classColor,
   discordTimestamp,
   encodeCharacterName,
@@ -221,6 +284,7 @@ module.exports = {
   qualityColor,
   realmMatchKey,
   slugifyRealm,
+  splitCharacterName,
   stripDiacritics,
   titleCase,
   wowheadItemUrl,

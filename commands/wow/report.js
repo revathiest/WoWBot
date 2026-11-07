@@ -297,7 +297,16 @@ async function postNow(interaction) {
 
   const now = Date.now();
   const { reports, failures } = await buildAllReports({ persist: true, now, config });
-  const delivered = await publishReports(interaction.client, reports, { config });
+
+  // If clearChannel wipes the bot's recent messages in the report channel, that
+  // includes this interaction's own deferred-reply placeholder when it was
+  // invoked there — excluding it keeps the later editReply from hitting a
+  // message that was just deleted out from under it.
+  const ownReply = await interaction.fetchReply().catch(() => null);
+  const delivered = await publishReports(interaction.client, reports, {
+    config,
+    excludeMessageId: ownReply?.id ?? null
+  });
 
   // Posting manually starts a fresh week, so the scheduled report does not
   // follow a few hours later with an almost-empty diff.

@@ -159,10 +159,12 @@ async function buildAllReports({
  * `bulkDelete` only works on messages under fourteen days old, which covers
  * every report on a daily or weekly schedule; anything older is deleted singly.
  */
-async function clearOwnMessages(channel, client) {
+async function clearOwnMessages(channel, client, excludeMessageId = null) {
   try {
     const recent = await channel.messages.fetch({ limit: 100 });
-    const mine = [...recent.values()].filter(message => message.author?.id === client.user?.id);
+    const mine = [...recent.values()].filter(
+      message => message.author?.id === client.user?.id && message.id !== excludeMessageId
+    );
 
     if (mine.length === 0) return 0;
 
@@ -189,7 +191,11 @@ async function clearOwnMessages(channel, client) {
  * instance refuses to post anywhere but its own guild, which is the same
  * protection `GUILD_ID` gives the command handlers.
  */
-async function publishReports(client, reports, { config = loadConfig(), guildId = readConfig().discord.guildId } = {}) {
+async function publishReports(
+  client,
+  reports,
+  { config = loadConfig(), guildId = readConfig().discord.guildId, excludeMessageId = null } = {}
+) {
   const byChannel = new Map();
 
   for (const report of reports) {
@@ -217,7 +223,7 @@ async function publishReports(client, reports, { config = loadConfig(), guildId 
         continue;
       }
 
-      if (config.clearChannel) await clearOwnMessages(channel, client);
+      if (config.clearChannel) await clearOwnMessages(channel, client, excludeMessageId);
 
       const guildRefs = entries.map(entry => ({ key: entry.key, name: entry.guild.name }));
 

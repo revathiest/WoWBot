@@ -41,6 +41,7 @@ function createInteraction({
       this.deferred = true;
     }),
     editReply: jest.fn(async () => {}),
+    fetchReply: jest.fn(async () => ({ id: 'reply-1' })),
     reply: jest.fn(async function reply() {
       this.replied = true;
     })

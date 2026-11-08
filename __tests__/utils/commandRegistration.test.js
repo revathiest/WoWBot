@@ -30,7 +30,7 @@ function fakeCommand(name) {
 const oneCommand = () => new Map([['token', fakeCommand('token')]]);
 
 // Every definition is stamped with Manage Server while the bot is locked down,
-// which is the shipped default. See PUBLIC_COMMANDS in config/ for the revert.
+// which is the shipped default. See readAdminOnly in config/ for the revert.
 const body = [
   {
     name: 'token',

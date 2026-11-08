@@ -256,6 +256,46 @@ describe('buildGuildReport', () => {
       expect.objectContaining({ name: 'Butud', today: 10, lifetime: 70 })
     ]);
   });
+
+  /** The embed field named "Most Kills <period>", whichever period it is. */
+  function killTallyField(embed) {
+    return (embed.toJSON().fields ?? []).find(field => field.name.startsWith('📅 Most Kills'));
+  }
+
+  // These need an actual gain in the tally — an empty one adds no field at
+  // all, which would make the label assertion vacuous.
+  function withAGain() {
+    loadKillHistory.mockReturnValue([{ capturedAt: MONDAY_18_UTC - DAY_MS, kills: { butud: 60 } }]);
+    collectSnapshot.mockResolvedValue({
+      snapshot: snapshotOf([{ name: 'Butud', level: 70, kills: 70 }]),
+      warnings: []
+    });
+  }
+
+  it('labels the kill-tally field "Today" on the default, daily config', async () => {
+    withAGain();
+    const { embed } = await buildGuildReport(APEX, { now: MONDAY_18_UTC });
+    expect(killTallyField(embed).name).toBe('📅 Most Kills Today');
+  });
+
+  it('defaults the kill-tally label to the loaded report config\'s frequency', async () => {
+    // No `frequency` passed explicitly — buildGuildReport is also called
+    // directly (e.g. by tools or future callers), not only through
+    // buildAllReports, so it must fall back to the real config itself.
+    withAGain();
+    loadConfig.mockReturnValue(weekly());
+
+    const { embed } = await buildGuildReport(APEX, { now: MONDAY_18_UTC });
+    expect(killTallyField(embed).name).toBe('📅 Most Kills This Week');
+  });
+
+  it('prefers an explicit frequency over the loaded config', async () => {
+    withAGain();
+    loadConfig.mockReturnValue(config());
+
+    const { embed } = await buildGuildReport(APEX, { now: MONDAY_18_UTC, frequency: 'weekly' });
+    expect(killTallyField(embed).name).toBe('📅 Most Kills This Week');
+  });
 });
 
 describe('buildAllReports', () => {
@@ -277,6 +317,19 @@ describe('buildAllReports', () => {
 
     expect(reports).toHaveLength(1);
     expect(failures).toEqual([expect.objectContaining({ guild: expect.objectContaining({ name: 'Broken' }) })]);
+  });
+
+  it("passes its own config's frequency to every guild's report, not each guild's own loaded config", async () => {
+    loadKillHistory.mockReturnValue([{ capturedAt: MONDAY_18_UTC - DAY_MS, kills: { butud: 60 } }]);
+    collectSnapshot.mockResolvedValue({
+      snapshot: snapshotOf([{ name: 'Butud', level: 70, kills: 70 }]),
+      warnings: []
+    });
+
+    const { reports } = await buildAllReports({ config: weekly(), now: MONDAY_18_UTC });
+    const field = (reports[0].embed.toJSON().fields ?? []).find(f => f.name.startsWith('📅 Most Kills'));
+
+    expect(field.name).toBe('📅 Most Kills This Week');
   });
 });
 

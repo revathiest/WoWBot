@@ -10,6 +10,7 @@ const {
   formatChange,
   guildLabel,
   killLines,
+  killTallyPeriodLabel,
   killTallySummaryLines,
   levelLines,
   listField,
@@ -153,6 +154,17 @@ describe('killTallySummaryLines', () => {
   });
 });
 
+describe('killTallyPeriodLabel', () => {
+  it('is "Today" on a daily cadence', () => {
+    expect(killTallyPeriodLabel('daily')).toBe('Today');
+    expect(killTallyPeriodLabel(undefined)).toBe('Today');
+  });
+
+  it('is "This Week" on a weekly cadence, since that is what the capture actually covers', () => {
+    expect(killTallyPeriodLabel('weekly')).toBe('This Week');
+  });
+});
+
 describe('buildKillTallyComponents', () => {
   it('builds one button per guild', () => {
     const rows = buildKillTallyComponents([{ key: 'a', name: 'Apex' }, { key: 'b', name: 'Second' }]);
@@ -242,6 +254,19 @@ describe('buildReportEmbed', () => {
 
     expect(field(embed, 'Quiet week')).toBeUndefined();
     expect(field(embed, '📅 Most Kills Today').value).toContain('Gainer');
+  });
+
+  it('calls the kill-tally field "This Week" on a weekly report cadence', () => {
+    // Kill-history is only captured when a report persists — once a week for
+    // a weekly guild — so that figure covers a week, not a day.
+    const embed = buildReportEmbed({
+      diff: diffSnapshots(snapshot([]), snapshot([])),
+      killTally: [{ name: 'Gainer', surname: 'One', today: 5, last7: 5, lifetime: 5 }],
+      frequency: 'weekly'
+    });
+
+    expect(field(embed, '📅 Most Kills Today')).toBeUndefined();
+    expect(field(embed, '📅 Most Kills This Week').value).toContain('Gainer');
   });
 
   it('does not call a first report a quiet week', () => {

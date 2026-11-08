@@ -212,8 +212,7 @@ Three channels are owned outright by the bot — the help post, the ticket lobby
 
 ## Admin-only lockdown
 
-- **`config.discord.adminOnly` is ON by default.** Every command requires Manage Server while it is, whatever the command declares for itself. `ADMIN_ONLY=false` lifts it.
-- **`PUBLIC_COMMANDS` in `config/index.js` is the undo.** It records which commands were open to everyone before the lock, so restoring is reading a list rather than reconstructing one. Keep it accurate if a public command is added.
+- **`config.discord.adminOnly` is ON by default.** Every command requires Manage Server while it is, whatever the command declares for itself. `ADMIN_ONLY=false` lifts it, restoring each command's own declared permissions — public for most, since only a few (`/report`, `/ticket`, `/auditlog`, `/autokick`, `/spam`) declare their own Manage Server restriction.
 - **The lock is applied twice, deliberately.** `buildDefinitions` stamps Manage Server onto every registration so members do not see the commands; `handleInteraction` re-checks, because a guild can override the permission Discord displays. Removing either one leaves a lock that does not hold.
 
 ## Mains and nicknames

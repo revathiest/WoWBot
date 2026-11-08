@@ -86,7 +86,13 @@ function isDue(config, now = Date.now()) {
  */
 async function buildGuildReport(
   guild,
-  { persist = false, now = Date.now(), onProgress, presentUserIds = null } = {}
+  {
+    persist = false,
+    now = Date.now(),
+    onProgress,
+    presentUserIds = null,
+    frequency = loadConfig().frequency
+  } = {}
 ) {
   const key = guildKey(guild);
   const { snapshot, warnings } = await collectSnapshot(guild, { capturedAt: now, onProgress });
@@ -94,15 +100,18 @@ async function buildGuildReport(
   const previous = loadSnapshot(key);
   const diff = diffSnapshots(previous, snapshot);
 
-  // Independent of `diff`: the kill tally runs once a day regardless of
-  // whether this guild's own report frequency is daily or weekly.
+  // Independent of `diff`, but NOT independent of `frequency`: kill-history is
+  // only appended when this report persists (below), which happens on this
+  // guild's own report cadence. On a weekly guild that means one capture a
+  // week, not a day — `buildReportEmbed` labels the field accordingly.
   const killTally = buildKillTally(loadKillHistory(key), snapshot.members, now);
   const embed = buildReportEmbed({
     diff,
     owners: buildOwnerIndex(),
     warnings,
     presentUserIds,
-    killTally
+    killTally,
+    frequency
   });
 
   if (persist) {
@@ -137,7 +146,15 @@ async function buildAllReports({
 
   for (const guild of config.guilds) {
     try {
-      reports.push(await buildGuildReport(guild, { persist, now, onProgress, presentUserIds }));
+      reports.push(
+        await buildGuildReport(guild, {
+          persist,
+          now,
+          onProgress,
+          presentUserIds,
+          frequency: config.frequency
+        })
+      );
     } catch (err) {
       failures.push({ guild, error: err });
       console.error(`❌ Weekly report failed for ${guild.name} (${guild.region}):`, err.message);

@@ -9,7 +9,7 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('
 
 const { characterKey } = require('./links');
 const { countPeople, splitByDiscord } = require('./membership');
-const { discordTimestamp, factionColor, formatNumber } = require('../wow');
+const { discordTimestamp, factionColor, formatNumber, fullCharacterName } = require('../wow');
 
 // Discord's hard limits. Exceeding any of them rejects the whole message, so
 // every list is capped rather than trusted to be short.
@@ -30,11 +30,6 @@ function formatChange(value) {
   return value > 0 ? `+${formatNumber(value)}` : formatNumber(value);
 }
 
-/** "Judgement Judy" — the full name, since the surname is half of it. */
-function fullName(entry) {
-  return [entry.name, entry.surname].filter(Boolean).join(' ');
-}
-
 /**
  * A character's name, upgraded to include a Discord mention when the person has
  * linked it with /iam. Reports work fine with nobody linked — that is the point
@@ -42,7 +37,7 @@ function fullName(entry) {
  */
 function nameOf(entry, owners) {
   const userId = owners?.get?.(characterKey({ name: entry.name, surname: entry.surname }));
-  const name = fullName(entry);
+  const name = fullCharacterName(entry);
   return userId ? `**${name}** (<@${userId}>)` : `**${name}**`;
 }
 
@@ -195,21 +190,37 @@ function describePeriod(diff) {
 }
 
 /**
+ * What to call the kill tally's most-recent-capture column.
+ *
+ * Kill-history is captured once per report, not on its own daily clock (see
+ * the note on buildGuildReport in scheduler.js) — so on a weekly cadence that
+ * figure covers a week, not a day. Shared by the report embed and the kill
+ * tally DM so the two never disagree about what the number means.
+ */
+function killTallyPeriodLabel(frequency) {
+  return frequency === 'weekly' ? 'This Week' : 'Today';
+}
+
+/**
  * One guild's report.
  *
  * @param {object} diff     From diffSnapshots.
  * @param {Map}    owners   Character key -> Discord user id, from buildOwnerIndex.
  * @param {string[]} warnings  Anything the collector could not fetch.
- * @param {object[]} killTally  From buildKillTally — today's/7-day/lifetime
- *   honorable kills per member, independent of the report's own frequency.
+ * @param {object[]} killTally  From buildKillTally — the most-recent-capture
+ *   gain, the 7-day gain, and lifetime honorable kills per member.
+ * @param {string} frequency  This guild's report cadence ('daily' or
+ *   'weekly'); see killTallyPeriodLabel.
  */
 function buildReportEmbed({
   diff,
   owners = new Map(),
   warnings = [],
   presentUserIds = null,
-  killTally = []
+  killTally = [],
+  frequency = 'daily'
 }) {
+  const killTallyPeriod = killTallyPeriodLabel(frequency);
   const embed = new EmbedBuilder()
     .setColor(factionColor(diff.guild?.faction))
     .setTitle(`Weekly Report — ${guildLabel(diff.guild)}`)
@@ -253,7 +264,7 @@ function buildReportEmbed({
   addList(embed, `⬆️ Level-ups (${diff.levelUps.length})`, levelLines(diff.levelUps, owners));
   addList(embed, `🎖️ Promotions (${diff.promotions.length})`, rankLines(diff.promotions, owners));
   addList(embed, '💀 Honorable Kills', killLines(diff.kills, owners));
-  addList(embed, '📅 Most Kills Today', killTallySummaryLines(killTally, owners));
+  addList(embed, `📅 Most Kills ${killTallyPeriod}`, killTallySummaryLines(killTally, owners));
 
   // A quiet week is a real result, and saying so beats an embed of bare totals
   // that looks like something failed.
@@ -298,6 +309,7 @@ module.exports = {
   formatChange,
   guildLabel,
   killLines,
+  killTallyPeriodLabel,
   killTallySummaryLines,
   levelLines,
   listField,

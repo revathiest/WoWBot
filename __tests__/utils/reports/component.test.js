@@ -5,10 +5,15 @@ jest.mock('../../../utils/reports/links', () => ({
   buildOwnerIndex: jest.fn(),
   mainFor: jest.fn()
 }));
+jest.mock('../../../utils/reports/config', () => ({
+  ...jest.requireActual('../../../utils/reports/config'),
+  loadConfig: jest.fn()
+}));
 
 const { loadSnapshot } = require('../../../utils/reports/history');
 const { loadKillHistory } = require('../../../utils/reports/killHistory');
 const { buildOwnerIndex, characterKey, mainFor } = require('../../../utils/reports/links');
+const { loadConfig, DEFAULTS } = require('../../../utils/reports/config');
 const { KILL_TALLY_BUTTON_PREFIX, ROSTER_BUTTON_PREFIX } = require('../../../utils/reports/render');
 const { embedLength } = require('../../../utils/embeds');
 const {
@@ -97,6 +102,7 @@ beforeEach(() => {
     new Map([[characterKey({ name: 'Butud', realm: 'nightslayer' }), 'u1']])
   );
   mainFor.mockReturnValue(null);
+  loadConfig.mockReturnValue({ ...DEFAULTS, frequency: 'daily' });
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -477,6 +483,18 @@ describe('killTallyLine', () => {
     expect(line).toContain('Today **—**');
     expect(line).toContain('7-Day **—**');
   });
+
+  it('relabels the first figure "This Week" on a weekly report cadence', () => {
+    // Kill-history is only captured when a report persists — once a week for
+    // a weekly guild — so calling that figure "Today" would be wrong.
+    const line = killTallyLine(
+      { name: 'Judgement', surname: 'Judy', today: 12, last7: 40, lifetime: 500 },
+      new Map(),
+      'weekly'
+    );
+
+    expect(line).toBe('**Judgement Judy** — This Week **+12** · 7-Day **+40** · Lifetime **500**');
+  });
 });
 
 describe('buildKillTallyMessages', () => {
@@ -499,6 +517,20 @@ describe('buildKillTallyMessages', () => {
 
     const header = allFields(messages).find(field => field.name.includes('Today'));
     expect(header.name).toBe('💀 Today · 7-Day · Lifetime');
+  });
+
+  it('relabels the column header "This Week" on a weekly report cadence', () => {
+    const messages = buildKillTallyMessages({
+      guild: { name: 'Apex' },
+      tally: [{ name: 'Judgement', surname: 'Judy', today: 12, last7: 40, lifetime: 500 }],
+      frequency: 'weekly'
+    });
+
+    const header = allFields(messages).find(field => field.name.includes('This Week'));
+    expect(header.name).toBe('💀 This Week · 7-Day · Lifetime');
+    expect(allLines(messages)).toContain(
+      '**Judgement Judy** — This Week **+12** · 7-Day **+40** · Lifetime **500**'
+    );
   });
 
   it('spills across messages rather than truncating, for a large guild', () => {
@@ -556,6 +588,17 @@ describe('handleComponent — kill tally', () => {
 
     const lines = allLines(fake.user.send.mock.calls.map(call => call[0].embeds));
     expect(lines.some(line => line.includes('Judgement Judy') && line.includes('+20'))).toBe(true);
+  });
+
+  it('labels the figure "This Week" when the report cadence is weekly', async () => {
+    loadConfig.mockReturnValue({ ...DEFAULTS, frequency: 'weekly' });
+    const fake = killInteraction();
+    await handleComponent(fake);
+
+    const lines = allLines(fake.user.send.mock.calls.map(call => call[0].embeds));
+    expect(lines.some(line => line.includes('Judgement Judy') && line.includes('This Week'))).toBe(
+      true
+    );
   });
 
   it('says so when there is no stored roster yet', async () => {

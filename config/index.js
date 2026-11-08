@@ -24,25 +24,14 @@ function buildNamespace(namespace, region) {
 }
 
 /**
- * Commands that were open to everyone before the server was locked down.
- *
- * This list is the UNDO. While `adminOnly` is on, every command requires Manage
- * Server regardless of what it declares for itself; turning it off restores
- * each command's own permissions, and these are the ones that go back to being
- * public. Recorded here so that restoring is reading a list rather than
- * reconstructing one from memory.
- *
- * One of them is a public command with admin-only SUBCOMMANDS, which keeps its
- * own gating either way: /iam (manage).
- */
-const PUBLIC_COMMANDS = ['audit', 'character', 'guild', 'help', 'iam', 'item', 'realm', 'realms'];
-
-/**
  * Locks every command to Manage Server.
  *
- * On by default while the bot is being rolled out. Set `ADMIN_ONLY=false` in
- * the environment to hand the commands in PUBLIC_COMMANDS back to everybody —
- * that is the whole revert.
+ * On by default while the bot is being rolled out. While it is on, every
+ * command requires Manage Server regardless of what it declares for itself.
+ * Set `ADMIN_ONLY=false` in the environment to restore each command's own
+ * declared permissions instead — public for most, since only a few (/report,
+ * /ticket, /auditlog, /autokick, /spam) declare their own Manage Server
+ * restriction. That is the whole revert.
  */
 function readAdminOnly(env = process.env) {
   const value = String(env.ADMIN_ONLY ?? '').trim().toLowerCase();
@@ -88,7 +77,7 @@ function readWatchInterval(value) {
 function readConfig(env = process.env) {
   return {
     discord: {
-      // While true, every command requires Manage Server. See PUBLIC_COMMANDS.
+      // While true, every command requires Manage Server. See readAdminOnly.
       adminOnly: readAdminOnly(env),
       token: env.DISCORD_TOKEN ?? '',
       applicationId: env.APPLICATION_ID ?? '',
@@ -130,7 +119,6 @@ function validateConfig(config = readConfig()) {
 }
 
 module.exports = {
-  PUBLIC_COMMANDS,
   REGIONS,
   GAME_INFIX,
   DEFAULT_REGION,

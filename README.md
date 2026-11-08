@@ -379,14 +379,15 @@ to be open to everyone. This is a deliberate rollout lock, and it is one setting
 ADMIN_ONLY=false
 ```
 
-Set that in the environment and restart, and these eleven commands go back to being public:
+Set that in the environment and restart, and every command goes back to its own declared
+permissions. In practice that means these go public:
 
-`/arena` `/audit` `/character` `/guild` `/help` `/iam` `/item` `/mythicplus` `/realm` `/realms`
-`/token`
+`/audit` `/character` `/guild` `/help` `/iam` `/item` `/realm` `/realms`
 
-That list lives in `PUBLIC_COMMANDS` in [config/index.js](config/index.js) so it cannot be lost.
-Two of them keep their own internal gating either way: `/help setup` and `/help unlock` are
-admin-only, as is everything under `/iam manage`.
+while `/report`, `/ticket`, `/auditlog`, `/autokick`, and `/spam` stay Manage Server-only, since
+they declare that restriction themselves rather than relying on the lockdown. Two of the public
+ones keep their own internal gating either way: `/help setup` and `/help unlock` are admin-only,
+as is everything under `/iam manage`.
 
 The lock is applied twice on purpose — once on the registration, so ordinary members do not see
 the commands at all, and once in the interaction handler, because a server can override the

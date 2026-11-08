@@ -42,7 +42,7 @@ describe('readConfig', () => {
       token: 'discord-token',
       applicationId: '123',
       guildId: '456',
-      // Locked by default; see PUBLIC_COMMANDS for the revert.
+      // Locked by default; see readAdminOnly for the revert.
       adminOnly: true
     });
     // No `game` and no `realm`: this bot serves one flavour, Classic Forever,
@@ -102,7 +102,7 @@ describe('validateConfig', () => {
 });
 
 describe('admin-only lockdown', () => {
-  const { PUBLIC_COMMANDS, readAdminOnly, readConfig: readConfig2 } = require('../config');
+  const { readAdminOnly, readConfig: readConfig2 } = require('../config');
 
   it('is on by default, so a fresh deploy is locked', () => {
     expect(readAdminOnly({})).toBe(true);
@@ -116,23 +116,6 @@ describe('admin-only lockdown', () => {
   it('stays on for anything else, rather than unlocking by accident', () => {
     expect(readAdminOnly({ ADMIN_ONLY: 'yes' })).toBe(true);
     expect(readAdminOnly({ ADMIN_ONLY: 'nonsense' })).toBe(true);
-  });
-
-  it('records the commands that were public, as the undo list', () => {
-    // This list is how the lock gets reverted; losing it means reconstructing
-    // it from memory. Shorter than it once was — /token, /arena and
-    // /mythicplus were removed outright, since Classic Forever has none of
-    // what they needed.
-    expect(PUBLIC_COMMANDS).toEqual([
-      'audit',
-      'character',
-      'guild',
-      'help',
-      'iam',
-      'item',
-      'realm',
-      'realms'
-    ]);
   });
 });
 

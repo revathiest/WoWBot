@@ -29,7 +29,13 @@ const { loadKillHistory } = require('./killHistory');
 const { buildKillTally } = require('./killTally');
 const { buildOwnerIndex, mainFor } = require('./links');
 const { countPeople, discordOnly, rosterUserIds, splitByDiscord } = require('./membership');
-const { KILL_TALLY_BUTTON_PREFIX, ROSTER_BUTTON_PREFIX, nameOf } = require('./render');
+const {
+  KILL_TALLY_BUTTON_PREFIX,
+  ROSTER_BUTTON_PREFIX,
+  killTallyPeriodLabel,
+  nameOf
+} = require('./render');
+const { loadConfig } = require('./config');
 const { FALLBACK_COLOR, formatNumber } = require('../wow');
 
 // Three inline fields sit side by side in Discord, so capping a column at a
@@ -204,10 +210,19 @@ function buildBreakdownMessages({ guild, split, outsiders = [], resolveMain = ma
   return packIntoMessages(embeds);
 }
 
-// The labels, in the one order used EVERYWHERE this tally appears — the
-// column header, every line, and the sort — so nobody has to cross-reference
-// a header against a differently-ordered line to know which number is which.
-const KILL_TALLY_COLUMNS = 'Today · 7-Day · Lifetime';
+/**
+ * The labels, in the one order used EVERYWHERE this tally appears — the
+ * column header, every line, and the sort — so nobody has to cross-reference
+ * a header against a differently-ordered line to know which number is which.
+ *
+ * The first label depends on `frequency`: kill-history is only captured when
+ * a report persists, which is this guild's own cadence, so a weekly guild's
+ * "most recent capture" figure covers a week, not a day (see
+ * killTallyPeriodLabel and the note on buildGuildReport in scheduler.js).
+ */
+function killTallyColumns(frequency) {
+  return `${killTallyPeriodLabel(frequency)} · 7-Day · Lifetime`;
+}
 
 /**
  * "**Judgement Judy** (<@111>) — Today **+12** · 7-Day **+40** · Lifetime **500**"
@@ -217,11 +232,11 @@ const KILL_TALLY_COLUMNS = 'Today · 7-Day · Lifetime';
  * carries its own label rather than relying on position, since a DM this long
  * will usually be read without the column header in view.
  */
-function killTallyLine(entry, owners) {
+function killTallyLine(entry, owners, frequency = 'daily') {
   const today = Number.isFinite(entry.today) ? `+${formatNumber(entry.today)}` : '—';
   const last7 = Number.isFinite(entry.last7) ? `+${formatNumber(entry.last7)}` : '—';
 
-  return `${nameOf(entry, owners)} — Today **${today}** · 7-Day **${last7}** · Lifetime **${formatNumber(
+  return `${nameOf(entry, owners)} — ${killTallyPeriodLabel(frequency)} **${today}** · 7-Day **${last7}** · Lifetime **${formatNumber(
     entry.lifetime
   )}**`;
 }
@@ -229,16 +244,20 @@ function killTallyLine(entry, owners) {
 /**
  * The whole kill tally, as however many messages it takes.
  *
- * Sorted by today's gain (see buildKillTally), so whoever is actively
- * grinding honour right now leads the list; the lifetime and 7-day columns
+ * Sorted by the most recent capture's gain (see buildKillTally), so whoever
+ * is actively grinding honour leads the list; the lifetime and 7-day columns
  * stay visible on every line rather than needing a second sort to see them.
  */
-function buildKillTallyMessages({ guild, tally, owners = new Map() }) {
+function buildKillTallyMessages({ guild, tally, owners = new Map(), frequency = 'daily' }) {
   const title = `${guild?.name ?? 'Guild'} — honorable kill tally`;
+  const columns = killTallyColumns(frequency);
   const description =
-    `${formatNumber(tally.length)} member(s) with honorable-kill data, sorted by today's gain. ` +
-    `Each line is **${KILL_TALLY_COLUMNS}**.`;
-  const fields = toFields(`💀 ${KILL_TALLY_COLUMNS}`, tally.map(entry => killTallyLine(entry, owners)));
+    `${formatNumber(tally.length)} member(s) with honorable-kill data, sorted by the most recent ` +
+    `gain. Each line is **${columns}**.`;
+  const fields = toFields(
+    `💀 ${columns}`,
+    tally.map(entry => killTallyLine(entry, owners, frequency))
+  );
 
   const reserve = title.length + 20 + description.length;
 
@@ -294,7 +313,12 @@ async function handleKillTallyComponent(interaction) {
     return true;
   }
 
-  const messages = buildKillTallyMessages({ guild: snapshot.guild, tally, owners: buildOwnerIndex() });
+  const messages = buildKillTallyMessages({
+    guild: snapshot.guild,
+    tally,
+    owners: buildOwnerIndex(),
+    frequency: loadConfig().frequency
+  });
 
   try {
     for (const embeds of messages) await interaction.user.send({ embeds });

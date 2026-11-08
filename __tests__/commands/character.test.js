@@ -5,12 +5,15 @@ jest.mock('../../utils/blizzard/profile', () => ({
   getCharacterPvpSummary: jest.fn()
 }));
 
+jest.mock('../../utils/reports/links', () => ({ mainFor: jest.fn(() => null) }));
+
 const {
   getCharacterProfile,
   getCharacterMedia,
   getCharacterEquipment,
   getCharacterPvpSummary
 } = require('../../utils/blizzard/profile');
+const { mainFor } = require('../../utils/reports/links');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const command = require('../../commands/wow/character');
 const { createInteraction, field, replyEmbed, replyPayload } = require('../helpers/interaction');
@@ -61,17 +64,18 @@ beforeEach(() => {
   getCharacterMedia.mockResolvedValue(MEDIA);
   getCharacterEquipment.mockResolvedValue(EQUIPMENT);
   getCharacterPvpSummary.mockResolvedValue({ honorable_kills: 1337, pvp_rank: 6 });
+  mainFor.mockReturnValue(null);
 });
 
 afterEach(() => jest.restoreAllMocks());
 
 describe('/character definition', () => {
-  it('requires only a character name', () => {
+  it('takes an optional character name, surname, and region', () => {
     const json = command.data.toJSON();
 
     expect(json.name).toBe('character');
     expect(json.options.map(option => [option.name, option.required])).toEqual([
-      ['character', true],
+      ['character', false],
       ['surname', false],
       ['region', false]
     ]);
@@ -116,6 +120,34 @@ describe('/character execute', () => {
     await command.execute(interaction({ region: 'eu' }));
 
     expect(getCharacterProfile).toHaveBeenCalledWith('judgement-judy', { region: 'eu' });
+  });
+
+  it('defaults to the caller\'s linked main when no character is given', async () => {
+    mainFor.mockReturnValue({ name: 'Judgement', surname: 'Judy', region: 'eu', main: true });
+    const target = interaction({ character: null });
+
+    await command.execute(target);
+
+    // The main's own stored region is used, not the bot's default.
+    expect(getCharacterProfile).toHaveBeenCalledWith('judgement-judy', { region: 'eu' });
+    expect(replyEmbed(target).title).toContain('Judgement Judy');
+  });
+
+  it('an explicit region option overrides the linked main\'s own region', async () => {
+    mainFor.mockReturnValue({ name: 'Judgement', surname: 'Judy', region: 'eu', main: true });
+
+    await command.execute(interaction({ character: null, region: 'kr' }));
+
+    expect(getCharacterProfile).toHaveBeenCalledWith('judgement-judy', { region: 'kr' });
+  });
+
+  it('asks for a name when no character is given and nothing is linked', async () => {
+    const target = interaction({ character: null });
+
+    await command.execute(target);
+
+    expect(replyPayload(target)).toContain('no linked main');
+    expect(getCharacterProfile).not.toHaveBeenCalled();
   });
 
   it('lists equipped items in paperdoll order, linked to Wowhead', async () => {

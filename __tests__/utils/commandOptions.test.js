@@ -1,4 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
+
+jest.mock('../../utils/reports/links', () => ({ mainFor: jest.fn(() => null) }));
+const { mainFor } = require('../../utils/reports/links');
 const {
   addRegionOption,
   addSurnameOption,
@@ -11,8 +14,11 @@ function builder() {
   return new SlashCommandBuilder().setName('example').setDescription('An example.');
 }
 
-function interaction(options = {}) {
-  return { options: { getString: name => (name in options ? options[name] : null) } };
+function interaction(options = {}, user = { id: 'user-1' }) {
+  return {
+    user,
+    options: { getString: name => (name in options ? options[name] : null) }
+  };
 }
 
 describe('addRegionOption', () => {
@@ -54,6 +60,18 @@ describe('resolveScope', () => {
       region: 'us',
       label: 'US'
     });
+  });
+
+  it('prefers a fallback region (a resolved main) over the configured default', () => {
+    expect(
+      resolveScope(interaction(), { blizzard: { region: 'us' } }, { fallbackRegion: 'eu' })
+    ).toEqual({ region: 'eu', label: 'EU' });
+  });
+
+  it('still prefers an explicit region option over the fallback', () => {
+    expect(
+      resolveScope(interaction({ region: 'kr' }), { blizzard: { region: 'us' } }, { fallbackRegion: 'eu' })
+    ).toEqual({ region: 'kr', label: 'KR' });
   });
 });
 
@@ -121,5 +139,50 @@ describe('resolveCharacterTarget', () => {
     });
 
     expect(target.characterName).toBe('judgement-judy');
+  });
+
+  describe('fallbackToMain', () => {
+    afterEach(() => mainFor.mockReset().mockReturnValue(null));
+
+    it('does not fall back unless asked to', () => {
+      expect(resolveCharacterTarget({ interaction: interaction({}) }).error).toContain(
+        'No character name'
+      );
+      expect(mainFor).not.toHaveBeenCalled();
+    });
+
+    it('resolves the caller\'s linked main when nothing was typed', () => {
+      mainFor.mockReturnValue({ name: 'Judgement', surname: 'Judy', region: 'eu', main: true });
+
+      const target = resolveCharacterTarget({
+        interaction: interaction({}, { id: 'user-42' }),
+        fallbackToMain: true
+      });
+
+      expect(mainFor).toHaveBeenCalledWith('user-42');
+      expect(target).toEqual({
+        characterName: 'judgement-judy',
+        displayName: 'Judgement Judy',
+        region: 'eu'
+      });
+    });
+
+    it('still honours an explicitly typed character over the caller\'s main', () => {
+      mainFor.mockReturnValue({ name: 'Someone', surname: 'Else', region: 'eu', main: true });
+
+      const target = resolveCharacterTarget({
+        interaction: interaction({ character: 'Judgement-Judy' }),
+        fallbackToMain: true
+      });
+
+      expect(mainFor).not.toHaveBeenCalled();
+      expect(target.characterName).toBe('judgement-judy');
+    });
+
+    it('errors by name when the caller has no linked main', () => {
+      const target = resolveCharacterTarget({ interaction: interaction({}), fallbackToMain: true });
+
+      expect(target.error).toContain('no linked main');
+    });
   });
 });

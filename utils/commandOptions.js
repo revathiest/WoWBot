@@ -6,6 +6,7 @@
 // serves one flavour, Classic Forever, which has neither.
 
 const { readConfig, normalizeRegion } = require('../config');
+const { mainFor } = require('./reports/links');
 const { REGION_CHOICES, characterSlug, fullCharacterName, splitCharacterName } = require('./wow');
 
 /** Adds the optional region picker. */
@@ -40,9 +41,16 @@ function resolveRegion(interaction, config = readConfig()) {
   return normalizeRegion(chosen) ?? config.blizzard.region;
 }
 
-/** Just the region, plus a label for embed titles: "US". */
-function resolveScope(interaction, config = readConfig()) {
-  const region = resolveRegion(interaction, config);
+/**
+ * Just the region, plus a label for embed titles: "US".
+ *
+ * `fallbackRegion` is used ahead of the configured default — the region a
+ * character resolved from `resolveCharacterTarget`'s main fallback actually
+ * lives in — but an explicit `region` option always wins over both.
+ */
+function resolveScope(interaction, config = readConfig(), { fallbackRegion } = {}) {
+  const chosen = interaction.options?.getString?.('region');
+  const region = normalizeRegion(chosen) ?? normalizeRegion(fallbackRegion) ?? config.blizzard.region;
 
   return { region, label: region.toUpperCase() };
 }
@@ -56,12 +64,36 @@ function resolveScope(interaction, config = readConfig()) {
  * naming exactly what to pass, since there is no realm to fall back to and
  * no way to guess the other half of someone's name.
  *
- * @returns {{characterName: string, displayName: string} | {error: string}}
+ * With `fallbackToMain` set, an omitted character falls back to the caller's
+ * linked main (`/iam`) instead of erroring — the result then also carries
+ * that character's own stored `region`, so a lookup with no `region` option
+ * queries where the main actually lives rather than the bot's default.
+ *
+ * @returns {{characterName: string, displayName: string, region?: string} | {error: string}}
  */
-function resolveCharacterTarget({ interaction, characterOption = 'character' }) {
+function resolveCharacterTarget({ interaction, characterOption = 'character', fallbackToMain = false }) {
   const typed = (interaction.options?.getString?.(characterOption) ?? '').trim();
 
-  if (!typed) return { error: 'No character name given.' };
+  if (!typed) {
+    if (fallbackToMain) {
+      const main = mainFor(interaction.user?.id);
+
+      if (main) {
+        return {
+          characterName: characterSlug(main.name, main.surname),
+          displayName: fullCharacterName(main),
+          region: main.region
+        };
+      }
+    }
+
+    return {
+      error: fallbackToMain
+        ? 'No character given, and you have no linked main. Pass a character name, or link one ' +
+          'with `/iam link`.'
+        : 'No character name given.'
+    };
+  }
 
   const split = splitCharacterName(typed);
   const given = (interaction.options?.getString?.('surname') ?? '').trim();

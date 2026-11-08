@@ -40,8 +40,8 @@ const data = new SlashCommandBuilder()
   .addStringOption(option =>
     option
       .setName('character')
-      .setDescription('Character name, e.g. Judgement, or Judgement-Judy')
-      .setRequired(true)
+      .setDescription('Character name, e.g. Judgement, or Judgement-Judy. Defaults to your linked main.')
+      .setRequired(false)
   );
 
 addSurnameOption(data);
@@ -172,14 +172,17 @@ function buildEmbed({ profile, media, equipment, pvp, scopeLabel }) {
 async function execute(interaction) {
   await interaction.deferReply();
 
-  const scope = resolveScope(interaction);
-  const target = resolveCharacterTarget({ interaction });
+  const target = resolveCharacterTarget({ interaction, fallbackToMain: true });
 
   if (target.error) {
     await interaction.editReply(`❌ ${target.error}`);
     return;
   }
 
+  // A character resolved from the caller's linked main carries its own stored
+  // region, which wins over the bot's default — but an explicit `region`
+  // option on the command still wins over that.
+  const scope = resolveScope(interaction, undefined, { fallbackRegion: target.region });
   const { characterName, displayName } = target;
 
   let profile;
@@ -224,7 +227,9 @@ async function execute(interaction) {
 
 module.exports = {
   data,
-  help: 'Shows level, class, ruleset, guild, item level, achievement points, and honorable kills for a character.',
+  help:
+    'Shows level, class, ruleset, guild, item level, achievement points, and honorable kills for a ' +
+    'character. Leave the character blank to look up your own linked main.',
   category: 'WoW',
   buildEmbed,
   equipmentFields,

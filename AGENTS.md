@@ -222,6 +222,7 @@ Three channels are owned outright by the bot — the help post, the ticket lobby
 - **The bot cannot rename the server owner — ever — and cannot rename anyone ranked at or above itself.** That covers most officers, so every path reports refusals with their reason instead of failing quietly. This is the single most likely thing to be mistaken for a broken feature.
 - **Nicknames are re-applied on `GuildMemberAdd`**, because Discord discards them when somebody leaves.
 - **Headcounts are people, unclaimed characters are characters** (`countPeople` in membership.js). Never fold the two together: alts collapse only when somebody has claimed them, and pretending otherwise turns a guess into a stated fact.
+- **A linked main is also a lookup shortcut.** `/character` with no character typed resolves the caller's own main via `resolveCharacterTarget({ ..., fallbackToMain: true })` in `utils/commandOptions.js`, and uses THAT character's own stored region ahead of the bot's configured default — an explicit `region` option still wins over both. No other character-taking command does this; it is opt-in per call, not a change to the shared resolver's default behaviour.
 
 ## Testing
 

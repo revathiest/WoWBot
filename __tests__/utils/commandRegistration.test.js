@@ -66,7 +66,8 @@ describe('loadCommandsRecursively', () => {
       'realms',
       'report',
       'spam',
-      'ticket'
+      'ticket',
+      'voice'
     ]);
   });
 

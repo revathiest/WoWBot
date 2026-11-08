@@ -30,6 +30,7 @@ const ICONS = {
   moderation: '🛡️',
   ticket: '🎫',
   report: '📊',
+  voice: '🔊',
   kick: '🥾',
   error: '❌',
   info: 'ℹ️'

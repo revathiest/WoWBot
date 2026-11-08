@@ -24,9 +24,10 @@ does not have.
   - `help.json` — which channel the help post lives in, and the ids of the messages that make it up.
   - `audit.json` — the audit log channel and how much to record.
   - `links.json` — Discord user id → the characters that person claimed with `/iam`, or that an admin assigned with `/iam manage assign`. **This is the only user data the bot stores**, it is volunteered rather than harvested, it holds nothing but an id and a `{name, surname, region}` per character, and `/iam forget` deletes a user's entry outright. Keep it that way: do not add display names, activity, or anything the user did not type in themselves.
+  - `voice.json` — per-guild "join to create" settings (the trigger channel, and an optional category override), plus one entry per private voice room currently open, keyed by its own channel id, recording its owner. The second half is **load-bearing, not a cache**: it is the only thing that lets the handler recognise "this channel is one of ours" and "whoever just left owns it" after a restart — nothing on a voice channel itself says that.
 
   Do not add another store without a very good reason.
-- **Privileged intents: `MessageContent` and `GuildMembers` are enabled, for spam detection only.** They must be switched on in the Discord Developer Portal or login fails. Do not add further privileged intents, and do not use these two for anything beyond moderation.
+- **Privileged intents: `MessageContent` and `GuildMembers` are enabled, for spam detection only.** They must be switched on in the Discord Developer Portal or login fails. Do not add further privileged intents, and do not use these two for anything beyond moderation. `GuildVoiceStates` (for `/voice`) is also enabled, but is NOT privileged — it needs no Developer Portal toggle.
 - **Native `fetch`.** Node 20+ provides it. Do not add axios, node-fetch, or a request library.
 
 ## Layering
@@ -181,6 +182,19 @@ Other things worth keeping:
 - **Closed-ticket history is capped** at `MAX_CLOSED_HISTORY`. Everything else in `data/` is settings; this is the one list that would otherwise grow forever.
 - **Close answers the interaction before rearranging the channel.** Editing permission overwrites and moving a channel between categories takes long enough to risk the interaction expiring first.
 
+## Private voice channels
+
+"Join to create": joining a configured trigger voice channel spawns a brand-new voice channel, moves the member into it, and hands them elevated, channel-scoped permissions over it. Leaving closes it.
+
+- **There is no separate "kick everyone" step.** Deleting a voice channel disconnects everyone still in it — that IS what "boots everyone" is. `handleLeave` in `utils/voice/core.js` just calls `channel.delete()`.
+- **The room closes when the OWNER leaves, not just when it empties.** These are two different triggers, both checked in `handleLeave`: `ownerLeft` (their room, their rules — gone the moment they step out, even if guests remain) and `empty` (nobody's left, for any reason — a crash, a kick, an owner who never actually got moved in). Either one closes it. A "wait for everyone to leave" rule alone would leave a room open indefinitely if the owner disconnects but a guest's client lags behind, or lets the owner hand their room to someone else by just not leaving — neither is wanted here.
+- **Ownership is tracked in `data/voice.json`, not inferred from the channel.** Nothing about a Discord voice channel says "the bot made this" or "this person owns it" — without a persisted record, a restart would turn every open room into an untracked, un-closable orphan. See the `voice.json` entry under "No database" above.
+- **The new room inherits permission overwrites from wherever it was spawned** — the configured category, or the trigger channel itself if there is no category — rather than getting a blank slate. A public hangout's trigger produces public rooms; a members-only lounge's trigger produces members-only rooms. `buildOverwrites` in `utils/voice/core.js` strips any inherited overwrite that already targets the new owner or the bot before layering their own on top, so a stale overwrite from the source can never fight the one that matters.
+- **The owner's permissions are deliberately channel-scoped, not server-wide.** `ManageRoles` in the overwrite it receives only lets it edit *this channel's* permission overwrites (lock it, block one person) — it grants nothing against the server's actual roles. Giving a member of the server `ManageChannels`/`ManageRoles`/`MoveMembers` as a channel overwrite, rather than a role, is what makes "full control of your own room" safe to hand out automatically.
+- **Creating the room and moving the member in are two separate calls, and either can fail independently.** A failed creation warns and gives up. A created room the member could not be moved into (they likely left mid-creation) is deleted immediately rather than left as an empty, ownerless room nobody would ever close.
+- **A channel deleted directly — not by someone leaving — still has to be forgotten.** `handlers/voiceHandler.js` also listens for `ChannelDelete` and drops the `voice.json` entry, or a manually-deleted room would leave a permanent stale record.
+- **`GuildVoiceStates` is a non-privileged intent.** Unlike `MessageContent`/`GuildMembers`, it needs no Developer Portal toggle — it was simply missing from `index.js` until this feature needed it.
+
 ## Locked channels
 
 Three channels are owned outright by the bot — the help post, the ticket lobby, and the audit log — and all of them go through `utils/channelLock.js`. It exists because Discord's permission resolution has a trap in it:
@@ -212,7 +226,7 @@ Three channels are owned outright by the bot — the help post, the ticket lobby
 
 ## Admin-only lockdown
 
-- **`config.discord.adminOnly` is ON by default.** Every command requires Manage Server while it is, whatever the command declares for itself. `ADMIN_ONLY=false` lifts it, restoring each command's own declared permissions — public for most, since only a few (`/report`, `/ticket`, `/auditlog`, `/autokick`, `/spam`) declare their own Manage Server restriction.
+- **`config.discord.adminOnly` is ON by default.** Every command requires Manage Server while it is, whatever the command declares for itself. `ADMIN_ONLY=false` lifts it, restoring each command's own declared permissions — public for most, since only a few (`/report`, `/ticket`, `/auditlog`, `/autokick`, `/spam`, `/voice`) declare their own Manage Server restriction.
 - **The lock is applied twice, deliberately.** `buildDefinitions` stamps Manage Server onto every registration so members do not see the commands; `handleInteraction` re-checks, because a guild can override the permission Discord displays. Removing either one leaves a lock that does not hold.
 
 ## Mains and nicknames

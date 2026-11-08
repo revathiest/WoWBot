@@ -9,6 +9,7 @@ const { registerCommands, registerGuildJoinHandler } = require('./utils/commandR
 const { registerInteractionHandler } = require('./handlers/interactionHandler');
 const { registerMessageHandler } = require('./handlers/messageHandler');
 const { registerMemberHandler } = require('./handlers/memberHandler');
+const { registerVoiceHandler } = require('./handlers/voiceHandler');
 const { loadConfig: loadSpamConfig } = require('./utils/spam/config');
 const { loadConfig: loadReportConfig, DAYS } = require('./utils/reports/config');
 const { startReportScheduler, nextSlotAt } = require('./utils/reports/scheduler');
@@ -39,6 +40,7 @@ if (problems.length > 0) {
 //   GuildMessages  - receive messages at all
 //   MessageContent - read what they say (privileged)
 //   GuildMembers   - member join date and roles, for trust tiers (privileged)
+//   GuildVoiceStates - who joins/leaves which voice channel, for /voice (not privileged)
 //
 // Partials let edits to messages that predate the current session still be seen.
 const client = new Client({
@@ -46,7 +48,8 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates
   ],
   partials: [Partials.Message, Partials.Channel]
 });
@@ -55,6 +58,8 @@ registerInteractionHandler(client, Events);
 registerMessageHandler(client, Events);
 // Restores a rejoining member's nickname; Discord drops it when they leave.
 registerMemberHandler(client, Events);
+// "Join to create" private voice channels.
+registerVoiceHandler(client, Events);
 // A guild that invites the bot gets its commands immediately, rather than at the
 // next restart.
 registerGuildJoinHandler(client, Events);
@@ -142,6 +147,15 @@ client.once(Events.ClientReady, async readyClient => {
     nicknames.enabled
       ? '   Nicknames: 🏷️  synced to main characters'
       : '   Nicknames: ⚪ not synced — /iam manage nicknames value:true'
+  );
+
+  const voiceGuilds = Object.keys(require('./utils/voice/store').load().settings).filter(guildId =>
+    isGuildInScope(guildId, config.discord.guildId)
+  );
+  console.log(
+    voiceGuilds.length > 0
+      ? `   Private voice: 🔊 join-to-create set up in ${voiceGuilds.length} guild(s)`
+      : '   Private voice: ⚪ not set up — /voice set-channel channel:#join-to-create'
   );
 
   const audit = loadAuditConfig();

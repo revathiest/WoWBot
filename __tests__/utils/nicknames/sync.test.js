@@ -61,8 +61,12 @@ beforeEach(() => {
 });
 
 describe('desiredNickname', () => {
-  it('is the character name', () => {
+  it('is the character name when there is no surname', () => {
     expect(desiredNickname(BUTUD)).toBe('Butud');
+  });
+
+  it('includes the surname when there is one', () => {
+    expect(desiredNickname({ name: 'Butud', surname: 'Smith' })).toBe('Butud Smith');
   });
 
   it('trims to Discord\'s 32-character cap rather than failing', () => {

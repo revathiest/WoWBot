@@ -22,9 +22,12 @@ const { mainFor } = require('../reports/links');
 // character name is still the right nickname, just shortened.
 const MAX_NICKNAME_LENGTH = 32;
 
-/** The nickname a member should have: their main character's name. */
+/** The nickname a member should have: their main character's full name. */
 function desiredNickname(character) {
-  const name = String(character?.name ?? '').trim();
+  const name = [character?.name, character?.surname]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
   return name ? name.slice(0, MAX_NICKNAME_LENGTH) : null;
 }
 

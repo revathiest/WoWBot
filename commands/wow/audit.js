@@ -11,7 +11,7 @@ const {
   resolveScope
 } = require('../../utils/commandOptions');
 const { auditEquipment } = require('../../utils/enchants');
-const { classColor, wowheadItemUrl } = require('../../utils/wow');
+const { classColor, fullCharacterName, wowheadItemUrl } = require('../../utils/wow');
 
 const PASS_COLOR = 0x43b581;
 const WARN_COLOR = 0xff8c00;
@@ -48,9 +48,7 @@ function buildEmbed({ profile, audit, scope, characterName }) {
     // Blizzard's casing beats what was typed, but only if it is the WHOLE name:
     // a profile splits it across `name` and `surname`.
     .setTitle(
-      `Enchant Audit — ${
-        [profile?.name, profile?.surname].filter(Boolean).join(' ') || characterName
-      } (${scope.label})`
+      `Enchant Audit — ${fullCharacterName(profile) || characterName} (${scope.label})`
     )
     .setDescription(verdict)
     .addFields(

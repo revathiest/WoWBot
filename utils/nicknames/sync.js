@@ -17,6 +17,7 @@
 const { PermissionFlagsBits } = require('discord.js');
 
 const { mainFor } = require('../reports/links');
+const { fullCharacterName } = require('../wow');
 
 // Discord's cap. Names are trimmed rather than rejected, since a 33-character
 // character name is still the right nickname, just shortened.
@@ -24,11 +25,10 @@ const MAX_NICKNAME_LENGTH = 32;
 
 /** The nickname a member should have: their main character's full name. */
 function desiredNickname(character) {
-  const name = [character?.name, character?.surname]
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-  return name ? name.slice(0, MAX_NICKNAME_LENGTH) : null;
+  const name = fullCharacterName(character);
+  // Re-trimmed after the slice: truncation can land right after the
+  // name/surname separator and leave a trailing space.
+  return name ? name.slice(0, MAX_NICKNAME_LENGTH).trim() : null;
 }
 
 /**

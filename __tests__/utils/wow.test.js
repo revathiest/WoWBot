@@ -249,3 +249,23 @@ describe('splitCharacterName', () => {
   });
 });
 
+describe('fullCharacterName', () => {
+  it('joins name and surname', () => {
+    expect(wow.fullCharacterName({ name: 'Judgement', surname: 'Judy' })).toBe('Judgement Judy');
+  });
+
+  it('drops a missing surname instead of leaving a trailing space', () => {
+    expect(wow.fullCharacterName({ name: 'Judgement' })).toBe('Judgement');
+    expect(wow.fullCharacterName({ name: 'Judgement', surname: null })).toBe('Judgement');
+  });
+
+  it('trims each half before joining, so stray whitespace cannot double up', () => {
+    expect(wow.fullCharacterName({ name: 'Judgement ', surname: ' Judy' })).toBe('Judgement Judy');
+  });
+
+  it('is empty, not null, when there is nothing to show', () => {
+    expect(wow.fullCharacterName({})).toBe('');
+    expect(wow.fullCharacterName(null)).toBe('');
+  });
+});
+

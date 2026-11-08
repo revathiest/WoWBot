@@ -15,7 +15,14 @@ const {
   resolveCharacterTarget,
   resolveScope
 } = require('../../utils/commandOptions');
-const { classColor, discordTimestamp, formatNumber, mediaAsset, wowheadItemUrl } = require('../../utils/wow');
+const {
+  classColor,
+  discordTimestamp,
+  formatNumber,
+  fullCharacterName,
+  mediaAsset,
+  wowheadItemUrl
+} = require('../../utils/wow');
 
 // Paperdoll order. Cosmetic slots (SHIRT, TABARD) are deliberately omitted so the
 // embed stays readable; everything a raider cares about is here.
@@ -97,7 +104,7 @@ function buildEmbed({ profile, media, equipment, pvp, scopeLabel }) {
   const specAndClass = [specName, className].filter(Boolean).join(' ') || 'Unknown';
 
   // Characters have no realm; the ruleset is their "where" instead.
-  const fullName = [profile.name, profile.surname].filter(Boolean).join(' ');
+  const fullName = fullCharacterName(profile);
   const where = profile.ruleset?.name ? ` — ${profile.ruleset.name}` : '';
 
   // No armory link: Classic Forever has no armory page at all.

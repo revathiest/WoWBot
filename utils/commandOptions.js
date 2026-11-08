@@ -6,7 +6,7 @@
 // serves one flavour, Classic Forever, which has neither.
 
 const { readConfig, normalizeRegion } = require('../config');
-const { REGION_CHOICES, characterSlug, splitCharacterName } = require('./wow');
+const { REGION_CHOICES, characterSlug, fullCharacterName, splitCharacterName } = require('./wow');
 
 /** Adds the optional region picker. */
 function addRegionOption(builder, description = 'Region to query. Defaults to the bot\'s configured region.') {
@@ -80,7 +80,7 @@ function resolveCharacterTarget({ interaction, characterOption = 'character' }) 
     };
   }
 
-  return { characterName: slug, displayName: [name, surname].filter(Boolean).join(' ') };
+  return { characterName: slug, displayName: fullCharacterName({ name, surname }) };
 }
 
 module.exports = {

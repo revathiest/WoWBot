@@ -34,7 +34,7 @@ const {
   resolveCharacterTarget,
   resolveScope
 } = require('../../utils/commandOptions');
-const { classColor, FALLBACK_COLOR } = require('../../utils/wow');
+const { classColor, FALLBACK_COLOR, fullCharacterName } = require('../../utils/wow');
 
 const data = new SlashCommandBuilder()
   .setName('iam')
@@ -152,8 +152,7 @@ const data = new SlashCommandBuilder()
   });
 
 function characterLine(character) {
-  const fullName = [character.name, character.surname].filter(Boolean).join(' ');
-  return `**${fullName}** (${character.region.toUpperCase()})`;
+  return `**${fullCharacterName(character)}** (${character.region.toUpperCase()})`;
 }
 
 function buildListEmbed(userId, characters) {
@@ -219,7 +218,7 @@ async function add(interaction, { targetId = interaction.user.id, force = false 
   );
 
   if (linked) {
-    const fullName = [profile.name, profile.surname].filter(Boolean).join(' ');
+    const fullName = fullCharacterName(profile);
     const lines = [`✅ **${fullName}** (${scope.label}) is linked to <@${targetId}>.`];
 
     if (movedFrom) {

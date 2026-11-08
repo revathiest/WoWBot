@@ -136,6 +136,19 @@ function splitCharacterName(value) {
   };
 }
 
+/**
+ * "Judgement Judy" — the inverse of `splitCharacterName`: joins a character's
+ * name and surname back into one display string. Each half is trimmed before
+ * joining, and a missing surname is dropped rather than left as a trailing
+ * space, so this is safe to feed straight into a truncated Discord field.
+ */
+function fullCharacterName(character) {
+  return [character?.name, character?.surname]
+    .map(part => String(part ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
 function titleCase(value) {
   return String(value ?? '')
     .split(/[\s-]+/)
@@ -247,6 +260,7 @@ module.exports = {
   formatDuration,
   formatGold,
   formatNumber,
+  fullCharacterName,
   localized,
   mediaAsset,
   qualityColor,

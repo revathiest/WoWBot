@@ -228,8 +228,14 @@ Three channels are owned outright by the bot — the help post, the ticket lobby
 
 ## Admin-only lockdown
 
-- **`config.discord.adminOnly` is ON by default.** Every command requires Manage Server while it is, whatever the command declares for itself. `ADMIN_ONLY=false` lifts it, restoring each command's own declared permissions — public for most, since only a few (`/report`, `/ticket`, `/auditlog`, `/autokick`, `/spam`, `/voice`) declare their own Manage Server restriction.
+- **`config.discord.adminOnly` is ON by default.** Every command requires Manage Server (or a configured admin role — see below) while it is, whatever the command declares for itself. `ADMIN_ONLY=false` lifts it, restoring each command's own declared permissions — public for most, since only a few (`/report`, `/ticket`, `/auditlog`, `/autokick`, `/spam`, `/voice`) declare their own Manage Server restriction.
 - **The lock is applied twice, deliberately.** `buildDefinitions` stamps Manage Server onto every registration so members do not see the commands; `handleInteraction` re-checks, because a guild can override the permission Discord displays. Removing either one leaves a lock that does not hold.
+
+## Admin roles
+
+- **`/adminrole add|remove|list` lets a guild name extra roles that count as admin**, on top of Manage Server/Administrator. The list is per-guild, persisted to `data/adminRoles.json` (`utils/adminRoles/config.js`), and consulted by the single shared `isAdmin()` in `utils/permissions.js` — every admin command, and the `adminOnly` lockdown check above, call that instead of checking `PermissionFlagsBits.ManageGuild` directly.
+- **`/adminrole` itself never accepts a configured role** — it checks `hasManageGuild()` directly, not `isAdmin()`, so a role it grants can never be used to grant further roles. Any change to that would turn one careless `/adminrole add` into a privilege-escalation loop.
+- **Adding a role here does not change what Discord shows in the command's UI.** `default_member_permissions` only ever reflects Manage Server; the admin-role list is an additional in-code check, same as the Manage Server re-check already described above.
 
 ## Mains and nicknames
 

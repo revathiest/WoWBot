@@ -54,6 +54,7 @@ describe('loadCommandsRecursively', () => {
     const commands = loadCommandsRecursively();
 
     expect([...commands.keys()].sort()).toEqual([
+      'adminrole',
       'audit',
       'auditlog',
       'autokick',

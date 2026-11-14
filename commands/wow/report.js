@@ -36,6 +36,7 @@ const { buildReportWorkbookBuffer } = require('../../utils/reports/excel');
 const { buildOwnerIndex } = require('../../utils/reports/links');
 const { addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
+const { isAdmin } = require('../../utils/permissions');
 const { discordTimestamp, FALLBACK_COLOR, REGION_CHOICES } = require('../../utils/wow');
 
 const DAY_CHOICES = DAYS.map((day, index) => ({ name: day, value: index }));
@@ -491,7 +492,7 @@ function configure(subcommand, interaction) {
 
 async function execute(interaction) {
   // The UI-level permission flag can be overridden per guild, so re-check here.
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!isAdmin(interaction)) {
     await interaction.reply({
       content: '❌ You need the Manage Server permission to use this.',
       flags: MessageFlags.Ephemeral

@@ -8,11 +8,13 @@ function createInteraction({
   subcommand = null,
   subcommandGroup = null,
   permissions = true,
+  roles = [],
   user = { id: 'user-1', username: 'tester' },
   client = {},
   guild = { id: 'test-guild', name: 'Test Guild' }
 } = {}) {
   const read = name => (name in options ? options[name] : null);
+  const roleIds = new Set(roles);
 
   return {
     commandName,
@@ -24,6 +26,7 @@ function createInteraction({
     // Anything that edits channel permissions needs the bot's own id.
     client: { commands, user: { id: 'bot-1' }, ...client },
     memberPermissions: { has: () => permissions },
+    member: { roles: { cache: { has: id => roleIds.has(id) } } },
     options: {
       getString: read,
       getInteger: read,

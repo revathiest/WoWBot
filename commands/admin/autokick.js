@@ -30,6 +30,7 @@ const {
 } = require('../../utils/onboarding/config');
 const { buildPreviewEmbed, buildSweepEmbed } = require('../../utils/onboarding/alert');
 const { inspectGuild, sweepGuild } = require('../../utils/onboarding/sweep');
+const { isAdmin } = require('../../utils/permissions');
 const { discordTimestamp, FALLBACK_COLOR } = require('../../utils/wow');
 
 const data = new SlashCommandBuilder()
@@ -277,7 +278,7 @@ async function run(interaction) {
 }
 
 async function execute(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!isAdmin(interaction)) {
     await interaction.reply({
       content: '❌ You need the Manage Server permission to use this.',
       flags: MessageFlags.Ephemeral

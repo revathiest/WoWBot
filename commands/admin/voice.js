@@ -14,6 +14,7 @@ const {
 } = require('discord.js');
 
 const store = require('../../utils/voice/store');
+const { isAdmin } = require('../../utils/permissions');
 const { FALLBACK_COLOR } = require('../../utils/wow');
 
 const data = new SlashCommandBuilder()
@@ -70,7 +71,7 @@ function buildStatusEmbed(settings) {
 }
 
 async function execute(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!isAdmin(interaction)) {
     await interaction.reply({
       content: '❌ You need the Manage Server permission to use this.',
       flags: MessageFlags.Ephemeral

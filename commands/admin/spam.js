@@ -16,6 +16,7 @@ const {
 const { loadConfig, saveConfig, ACTIONS } = require('../../utils/spam/config');
 const detector = require('../../utils/spam/detector');
 const { formatDuration } = require('../../utils/spam/alert');
+const { isAdmin } = require('../../utils/permissions');
 const { FALLBACK_COLOR } = require('../../utils/wow');
 
 const ACTION_CHOICES = ACTIONS.map(action => ({
@@ -338,7 +339,7 @@ function applyConfigure(subcommand, interaction) {
 
 async function execute(interaction) {
   // The UI-level permission flag can be overridden per guild, so re-check here.
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!isAdmin(interaction)) {
     await interaction.reply({
       content: '❌ You need the Manage Server permission to use this.',
       flags: MessageFlags.Ephemeral

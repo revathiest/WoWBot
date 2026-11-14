@@ -1,11 +1,12 @@
 // handlers/interactionHandler.js
 // Routes chat-input interactions to their command module and keeps failures contained.
 
-const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { MessageFlags } = require('discord.js');
 const { BlizzardApiError } = require('../utils/blizzard/client');
 const { isGuildInScope } = require('../utils/guildScope');
 const { routeComponent } = require('../utils/components');
 const { describeCommand, record } = require('../utils/audit/log');
+const { isAdmin } = require('../utils/permissions');
 const { readConfig } = require('../config');
 
 /**
@@ -214,10 +215,11 @@ async function handleInteraction(interaction) {
     return;
   }
 
-  // While the bot is locked down, every command needs Manage Server. The
+  // While the bot is locked down, every command needs Manage Server (or one of
+  // the guild's configured admin roles — see utils/permissions). The
   // default-member-permissions flag on the registration only hides them; a
   // guild can override it, so this is the check that actually holds.
-  if (readConfig().discord.adminOnly && !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (readConfig().discord.adminOnly && !isAdmin(interaction)) {
     await respondWithError(
       interaction,
       '❌ This bot is currently limited to server administrators.'

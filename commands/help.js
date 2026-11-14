@@ -9,7 +9,6 @@
 const {
   SlashCommandBuilder,
   EmbedBuilder,
-  PermissionFlagsBits,
   MessageFlags,
   ChannelType
 } = require('discord.js');
@@ -18,6 +17,7 @@ const store = require('../utils/help/store');
 const { setupHelpChannel } = require('../utils/help/post');
 const { ADMIN_CATEGORIES, buildCommandEmbed, buildHelpMessages } = require('../utils/help/content');
 const { isLocked, unlockChannel } = require('../utils/channelLock');
+const { isAdmin } = require('../utils/permissions');
 const { FALLBACK_COLOR } = require('../utils/wow');
 
 const data = new SlashCommandBuilder()
@@ -56,10 +56,6 @@ const data = new SlashCommandBuilder()
       )
   )
   .addSubcommand(sub => sub.setName('status').setDescription('Where the help post lives.'));
-
-function isAdmin(interaction) {
-  return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
-}
 
 /** Summarises what the lock did, including what it could not do. */
 function describeLock(lock, channel) {

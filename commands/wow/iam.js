@@ -8,12 +8,7 @@
 // That is why this command needs no permissions and why `forget` deletes
 // everything in one step — see the note at the top of utils/reports/links.js.
 
-const {
-  SlashCommandBuilder,
-  EmbedBuilder,
-  MessageFlags,
-  PermissionFlagsBits
-} = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 
 const {
   MAX_CHARACTERS_PER_USER,
@@ -28,6 +23,7 @@ const { loadConfig: loadNicknameConfig, saveConfig: saveNicknameConfig } = requi
 const { planGuild, syncGuild, syncMember } = require('../../utils/nicknames/sync');
 const { getCharacterProfile } = require('../../utils/blizzard/profile');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
+const { isAdmin } = require('../../utils/permissions');
 const {
   addRegionOption,
   addSurnameOption,
@@ -345,11 +341,6 @@ async function changeMain(interaction, { targetId }) {
   const note = describeNickname(await applyNickname(interaction, targetId));
 
   return [`✅ **${main.name}** is now ${who} main.`, note].filter(Boolean).join(' ');
-}
-
-/** Assigning on somebody's behalf is a moderator action, not a self-service one. */
-function isAdmin(interaction) {
-  return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
 }
 
 /**

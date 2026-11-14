@@ -27,6 +27,15 @@ function response(body, { status = 200, headers = {} } = {}) {
 
 const tokenResponse = () => response({ access_token: 'access-token', expires_in: 86399 });
 
+/** Puts an env var back exactly as it was, rather than coercing `undefined` to the string "undefined". */
+function restoreEnv(name, previousValue) {
+  if (previousValue === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = previousValue;
+  }
+}
+
 /** Routes OAuth calls to a token and everything else through `apiResponses` in order. */
 function mockFetch(apiResponses) {
   const queue = [...apiResponses];
@@ -144,6 +153,27 @@ describe('getAccessToken', () => {
 
     await expect(getAccessToken({ config })).rejects.toThrow();
     await expect(getAccessToken({ config })).resolves.toBe('access-token');
+  });
+
+  it('treats a missing expiry as already expired, rather than throwing', async () => {
+    global.fetch = jest.fn(async () => response({ access_token: 'access-token' }));
+
+    await expect(getAccessToken({ config })).resolves.toBe('access-token');
+  });
+
+  it('falls back to the real config and default timeout when called with no options', async () => {
+    const previousId = process.env.BLIZZARD_CLIENT_ID;
+    const previousSecret = process.env.BLIZZARD_CLIENT_SECRET;
+    process.env.BLIZZARD_CLIENT_ID = 'env-client-id';
+    process.env.BLIZZARD_CLIENT_SECRET = 'env-client-secret';
+    global.fetch = jest.fn(async () => tokenResponse());
+
+    try {
+      await expect(getAccessToken()).resolves.toBe('access-token');
+    } finally {
+      restoreEnv('BLIZZARD_CLIENT_ID', previousId);
+      restoreEnv('BLIZZARD_CLIENT_SECRET', previousSecret);
+    }
   });
 });
 
@@ -267,5 +297,48 @@ describe('request', () => {
     await expect(request('/flaky', { namespace: 'static', config })).resolves.toEqual({
       recovered: true
     });
+  });
+
+  it('waits out a retry-after that names a positive delay, rather than the default backoff', async () => {
+    global.fetch = mockFetch([
+      response({}, { status: 429, headers: { 'retry-after': '0.01' } }),
+      response({ recovered: true })
+    ]);
+
+    await expect(request('/busy', { namespace: 'static', config })).resolves.toEqual({
+      recovered: true
+    });
+  });
+
+  it('exhausts its retries and throws when the token keeps being rejected', async () => {
+    global.fetch = mockFetch([
+      response({}, { status: 401 }),
+      response({}, { status: 401 }),
+      response({}, { status: 401 })
+    ]);
+
+    await expect(request('/data/wow/token/index', { namespace: 'dynamic', config })).rejects.toThrow(
+      /rejected the access token/
+    );
+  });
+
+  it('falls back to the real config when called with no options at all', async () => {
+    const previousId = process.env.BLIZZARD_CLIENT_ID;
+    const previousSecret = process.env.BLIZZARD_CLIENT_SECRET;
+    process.env.BLIZZARD_CLIENT_ID = 'env-client-id';
+    process.env.BLIZZARD_CLIENT_SECRET = 'env-client-secret';
+    global.fetch = mockFetch([response({ ok: true })]);
+
+    try {
+      await expect(request('/data/wow/ruleset/index')).resolves.toEqual({ ok: true });
+
+      const [url] = global.fetch.mock.calls[1];
+      // BLIZZARD_REGION/LOCALE are pinned by jest.setup.js; this just proves
+      // readConfig() was actually consulted rather than throwing on a missing options object.
+      expect(url.origin).toBe('https://us.api.blizzard.com');
+    } finally {
+      restoreEnv('BLIZZARD_CLIENT_ID', previousId);
+      restoreEnv('BLIZZARD_CLIENT_SECRET', previousSecret);
+    }
   });
 });

@@ -126,6 +126,20 @@ describe('getRulesets', () => {
 
     expect(await getRulesets({ region: 'eu', game: 'forever' })).toEqual([]);
   });
+
+  it('falls back to the default region when called with no options at all', async () => {
+    await getRulesets();
+
+    expect(getRulesetIndex).toHaveBeenCalledWith(expect.objectContaining({ region: 'us' }));
+  });
+
+  it('leaves status and the auction link null when a document carries neither', async () => {
+    getRuleset.mockResolvedValue({ id: 1, name: 'Bare' });
+
+    const rulesets = await getRulesets({ region: 'eu', game: 'forever' });
+
+    expect(rulesets[0]).toMatchObject({ status: null, statusLabel: null, auctionsHref: null });
+  });
 });
 
 describe('findRuleset', () => {
@@ -158,6 +172,10 @@ describe('findRuleset', () => {
   it('falls through to name matching when a number is not an id', () => {
     // "9" is not a ruleset id here, and must not be reported as one.
     expect(findRuleset(list, '9')).toBeNull();
+  });
+
+  it('returns null when the query has no alphanumeric characters at all', () => {
+    expect(findRuleset(list, '---')).toBeNull();
   });
 });
 
@@ -193,5 +211,9 @@ describe('resolveRuleset', () => {
 
     expect(await resolveRuleset('Normal', { region: 'eu', game: 'forever' })).toBeNull();
     expect(console.warn).toHaveBeenCalled();
+  });
+
+  it('falls back to the default region when called with no options at all', async () => {
+    expect(await resolveRuleset('Normal')).toMatchObject({ id: 2 });
   });
 });

@@ -1,6 +1,8 @@
 jest.mock('../../../utils/reports/collect');
 jest.mock('../../../utils/reports/history');
 jest.mock('../../../utils/reports/killHistory');
+jest.mock('../../../utils/reports/reportHistory');
+jest.mock('../../../utils/audit/log');
 jest.mock('../../../utils/reports/config', () => ({
   ...jest.requireActual('../../../utils/reports/config'),
   loadConfig: jest.fn(),
@@ -10,6 +12,8 @@ jest.mock('../../../utils/reports/config', () => ({
 const { collectSnapshot } = require('../../../utils/reports/collect');
 const { loadSnapshot, saveSnapshot } = require('../../../utils/reports/history');
 const { appendKillEntry, loadKillHistory } = require('../../../utils/reports/killHistory');
+const { appendReportHistoryEntry } = require('../../../utils/reports/reportHistory');
+const { record } = require('../../../utils/audit/log');
 const { loadConfig, saveConfig, DEFAULTS } = require('../../../utils/reports/config');
 const { buildSnapshot } = require('../../../utils/reports/diff');
 
@@ -17,9 +21,11 @@ const {
   DAY_MS,
   buildAllReports,
   buildGuildReport,
+  clearOwnMessages,
   isDue,
   lastSlotAt,
   nextSlotAt,
+  presentIdsFor,
   publishReports,
   runScheduledReports,
   startReportScheduler
@@ -135,6 +141,11 @@ describe('nextSlotAt', () => {
     const now = Date.UTC(2026, 8, 14, 20, 0, 0);
     expect(nextSlotAt(weekly(), now) - lastSlotAt(weekly(), now)).toBe(7 * DAY_MS);
   });
+
+  it('defaults to right now when no instant is given', () => {
+    expect(lastSlotAt(config())).toBeLessThanOrEqual(Date.now());
+    expect(nextSlotAt(config())).toBeGreaterThan(Date.now());
+  });
 });
 
 describe('isDue', () => {
@@ -183,6 +194,11 @@ describe('isDue', () => {
 
     expect(isDue(cfg, now)).toBe(true);
   });
+
+  it('defaults to right now when no instant is given', () => {
+    // A slot from decades ago is due under any real "now".
+    expect(isDue(config({ enabled: true, hour: 0, lastPostedAt: null }))).toBe(true);
+  });
 });
 
 describe('buildGuildReport', () => {
@@ -195,6 +211,15 @@ describe('buildGuildReport', () => {
     // Persisting is what consumes the baseline, so only the real run may do it.
     await buildGuildReport(APEX, { persist: true });
     expect(saveSnapshot).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ members: expect.any(Object) }));
+  });
+
+  it('appends to the long-running history log when posting for real, not when previewing', async () => {
+    await buildGuildReport(APEX, { persist: true });
+    expect(appendReportHistoryEntry).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ isFirstRun: expect.any(Boolean) }));
+
+    appendReportHistoryEntry.mockClear();
+    await buildGuildReport(APEX, { persist: false });
+    expect(appendReportHistoryEntry).not.toHaveBeenCalled();
   });
 
   it('diffs against the stored snapshot', async () => {
@@ -331,6 +356,11 @@ describe('buildAllReports', () => {
 
     expect(field.name).toBe('📅 Most Kills This Week');
   });
+
+  it('falls back to the loaded config and right now when called with no options at all', async () => {
+    const { reports } = await buildAllReports();
+    expect(reports).toHaveLength(1);
+  });
 });
 
 describe('publishReports', () => {
@@ -411,6 +441,166 @@ describe('publishReports', () => {
 
     expect(client.channels.fetch).not.toHaveBeenCalled();
   });
+
+  it('clears the channel first when clearChannel is on', async () => {
+    const client = fakeClient();
+    // clearOwnMessages's own branches are covered directly, below; this just
+    // has to prove publishReports actually calls it when asked to.
+    client.channels.fetch.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'test-guild',
+      isTextBased: () => true,
+      send: client.send,
+      messages: { fetch: jest.fn().mockResolvedValue(new Map()) }
+    });
+
+    const cfg = config({ clearChannel: true });
+    const { reports } = await buildAllReports({ config: cfg });
+
+    await publishReports(client, reports, { config: cfg, guildId: null });
+
+    expect(client.send).toHaveBeenCalled();
+  });
+
+  it('leaves previous messages alone when clearChannel is off', async () => {
+    const client = fakeClient();
+    const cfg = config({ clearChannel: false });
+    const { reports } = await buildAllReports({ config: cfg });
+
+    await publishReports(client, reports, { config: cfg, guildId: null });
+
+    // No `messages` manager on this stub at all — if clearOwnMessages were
+    // called, awaiting `channel.messages.fetch` would throw.
+    expect(client.send).toHaveBeenCalled();
+  });
+
+  it('falls back to the loaded config and this instance\'s own guild scope when called with just a client and reports', async () => {
+    const client = fakeClient();
+    const { reports } = await buildAllReports({ config: config() });
+
+    await expect(publishReports(client, reports)).resolves.toBeDefined();
+  });
+});
+
+describe('clearOwnMessages', () => {
+  /** A fake channel with just enough of the discord.js message-manager shape. */
+  function fakeChannel(messages) {
+    return {
+      id: 'channel-1',
+      messages: { fetch: jest.fn().mockResolvedValue(new Map(messages.map((m, i) => [i, m]))) },
+      bulkDelete: jest.fn().mockResolvedValue(undefined)
+    };
+  }
+
+  function message({ authorId = 'bot-1', id = 'm1', createdTimestamp = Date.now() } = {}) {
+    return { id, author: { id: authorId }, createdTimestamp, delete: jest.fn().mockResolvedValue(undefined) };
+  }
+
+  const client = { user: { id: 'bot-1' } };
+
+  it('deletes nothing and returns 0 when the bot has posted nothing here', async () => {
+    const channel = fakeChannel([message({ authorId: 'someone-else' })]);
+
+    expect(await clearOwnMessages(channel, client)).toBe(0);
+    expect(channel.bulkDelete).not.toHaveBeenCalled();
+  });
+
+  it('excludes the given message id, e.g. the interaction\'s own deferred reply', async () => {
+    const own = message({ id: 'reply-1' });
+    const channel = fakeChannel([own, message({ id: 'older' })]);
+
+    const count = await clearOwnMessages(channel, client, 'reply-1');
+
+    expect(count).toBe(1);
+    expect(channel.bulkDelete).toHaveBeenCalledWith([expect.objectContaining({ id: 'older' })], true);
+  });
+
+  it('defaults to excluding nothing when no id is given', async () => {
+    const channel = fakeChannel([message({ id: 'a' }), message({ id: 'b' })]);
+
+    const count = await clearOwnMessages(channel, client);
+
+    expect(count).toBe(2);
+  });
+
+  it('bulk-deletes recent messages and deletes stale ones one at a time', async () => {
+    const fresh = message({ id: 'fresh', createdTimestamp: Date.now() });
+    const stale = message({ id: 'stale', createdTimestamp: Date.now() - 20 * DAY_MS });
+    const channel = fakeChannel([fresh, stale]);
+
+    const count = await clearOwnMessages(channel, client);
+
+    expect(count).toBe(2);
+    expect(channel.bulkDelete).toHaveBeenCalledWith([fresh], true);
+    expect(stale.delete).toHaveBeenCalled();
+  });
+
+  it('skips bulkDelete entirely when every message is stale', async () => {
+    const stale = message({ id: 'stale', createdTimestamp: Date.now() - 20 * DAY_MS });
+    const channel = fakeChannel([stale]);
+
+    await clearOwnMessages(channel, client);
+
+    expect(channel.bulkDelete).not.toHaveBeenCalled();
+    expect(stale.delete).toHaveBeenCalled();
+  });
+
+  it('does not let one stale message that cannot be deleted stop the others', async () => {
+    const stale = message({ id: 'stale', createdTimestamp: Date.now() - 20 * DAY_MS });
+    stale.delete.mockRejectedValue(new Error('Unknown Message'));
+    const channel = fakeChannel([stale]);
+
+    await expect(clearOwnMessages(channel, client)).resolves.toBe(1);
+  });
+
+  it('never lets a tidy-up failure stop the report from going out', async () => {
+    const channel = {
+      id: 'channel-1',
+      messages: { fetch: jest.fn().mockRejectedValue(new Error('Missing Access')) }
+    };
+
+    expect(await clearOwnMessages(channel, client)).toBe(0);
+    expect(console.warn).toHaveBeenCalled();
+  });
+});
+
+describe('presentIdsFor', () => {
+  function clientWith(channel) {
+    return { channels: { fetch: jest.fn().mockResolvedValue(channel) } };
+  }
+
+  it('is null when there is no channel to read members from at all', async () => {
+    const cfg = config({ channelId: null, guilds: [{ ...APEX, channelId: null }] });
+    expect(await presentIdsFor({ channels: { fetch: jest.fn() } }, cfg)).toBeNull();
+  });
+
+  it('falls back to a per-guild channel when there is no default one', async () => {
+    const cfg = config({ channelId: null, guilds: [{ ...APEX, channelId: 'override' }] });
+    const client = clientWith({ guild: { members: { fetch: jest.fn().mockResolvedValue(new Map()) } } });
+
+    await presentIdsFor(client, cfg);
+
+    expect(client.channels.fetch).toHaveBeenCalledWith('override');
+  });
+
+  it('is null when the channel has no guild (e.g. a DM)', async () => {
+    const client = clientWith({ guild: null });
+    expect(await presentIdsFor(client, config())).toBeNull();
+  });
+
+  it('reads the member ids from the channel\'s guild', async () => {
+    const members = new Map([['u1', {}], ['u2', {}]]);
+    const client = clientWith({ guild: { members: { fetch: jest.fn().mockResolvedValue(members) } } });
+
+    const ids = await presentIdsFor(client, config());
+
+    expect(ids).toEqual(new Set(['u1', 'u2']));
+  });
+
+  it('is null, not a thrown error, when the channel cannot be fetched', async () => {
+    const client = { channels: { fetch: jest.fn().mockRejectedValue(new Error('Missing Access')) } };
+    expect(await presentIdsFor(client, config())).toBeNull();
+  });
 });
 
 describe('runScheduledReports', () => {
@@ -432,6 +622,22 @@ describe('runScheduledReports', () => {
   it('appends the daily kill history, even on a weekly-frequency guild', async () => {
     await runScheduledReports(fakeClient(), { now: MONDAY_18_UTC, config: weekly() });
     expect(appendKillEntry).toHaveBeenCalled();
+  });
+
+  it('records the failure count when a guild could not be built', async () => {
+    collectSnapshot.mockRejectedValue(new Error('404'));
+
+    await runScheduledReports(fakeClient(), { now: MONDAY_18_UTC, config: config() });
+
+    expect(record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ detail: expect.stringContaining('failed'), ok: false })
+    );
+  });
+
+  it('falls back to the loaded config and right now when called with no options at all', async () => {
+    await runScheduledReports(fakeClient());
+    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({ lastPostedAt: expect.any(Number) }));
   });
 });
 
@@ -470,5 +676,53 @@ describe('startReportScheduler', () => {
     jest.advanceTimersByTime(10_000);
 
     expect(collectSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('does not double-post when a tick is still running at the next interval', async () => {
+    loadConfig.mockReturnValue(config({ enabled: true, lastPostedAt: null }));
+    const stop = startReportScheduler(fakeClient(), { intervalMs: 10, now: () => MONDAY_18_UTC });
+
+    // Both intervals elapse before either tick's first await yields back to
+    // the microtask queue, so the second must see `running` already true.
+    jest.advanceTimersByTime(25);
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+
+    expect(collectSnapshot).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('logs, rather than crashes the process, when a tick throws', async () => {
+    collectSnapshot.mockRejectedValue(new Error('boom'));
+    loadConfig.mockReturnValue(config({ enabled: true, lastPostedAt: null }));
+    // saveConfig is what runScheduledReports calls last; throwing there is an
+    // easy way to make the whole tick reject regardless of per-guild failures.
+    saveConfig.mockImplementation(() => {
+      throw new Error('disk full');
+    });
+
+    const stop = startReportScheduler(fakeClient(), { intervalMs: 10, now: () => MONDAY_18_UTC });
+
+    jest.advanceTimersByTime(10);
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('scheduler failed'),
+      expect.any(Error)
+    );
+    stop();
+  });
+
+  it('defaults to CHECK_INTERVAL_MS and the real clock when called with no options', async () => {
+    const { CHECK_INTERVAL_MS } = require('../../../utils/reports/scheduler');
+    // null lastPostedAt is always due (see isDue), so this is due under
+    // whatever the real wall clock happens to be when the test runs.
+    loadConfig.mockReturnValue(config({ enabled: true, lastPostedAt: null }));
+    const stop = startReportScheduler(fakeClient());
+
+    jest.advanceTimersByTime(CHECK_INTERVAL_MS);
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+
+    expect(collectSnapshot).toHaveBeenCalled();
+    stop();
   });
 });

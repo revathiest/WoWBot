@@ -81,12 +81,20 @@ async function putGuildCommands({ rest, applicationId, guildId, definitions, lab
  * regardless of what the command declares for itself. That hides them from
  * ordinary members in the UI; the real check is in handlers/interactionHandler,
  * since a guild can override the permission Discord shows.
+ *
+ * A command that sets `ignoresAdminOnlyLockdown` skips that stamp even while
+ * the lockdown is on: it manages its own permission entirely in code (see
+ * utils/permissions' isAdmin, which also accepts a guild's configured
+ * /adminrole roles, not just Manage Server), so forcing Manage Server into its
+ * UI visibility would hide it from exactly the people /adminrole is meant to
+ * admit. This is opt-in per command, one at a time — most admin commands stay
+ * under the blanket stamp.
  */
 function buildDefinitions(commandMap, { adminOnly = readConfig().discord.adminOnly } = {}) {
   return [...commandMap.values()].map(command => {
     const definition = command.data.toJSON();
 
-    if (!adminOnly) return definition;
+    if (!adminOnly || command.ignoresAdminOnlyLockdown) return definition;
 
     return {
       ...definition,

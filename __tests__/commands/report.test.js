@@ -12,8 +12,6 @@ jest.mock('../../utils/reports/reportHistory');
 jest.mock('../../utils/reports/excel');
 jest.mock('../../utils/reports/links');
 
-const { PermissionFlagsBits } = require('discord.js');
-
 const {
   DEFAULTS,
   MAX_TRACKED_GUILDS,
@@ -83,11 +81,12 @@ beforeEach(() => {
 });
 
 describe('command shape', () => {
-  it('is named /report and declares Manage Server', () => {
+  it('is named /report, visible to everyone, and gated in code instead', () => {
     const json = command.data.toJSON();
 
     expect(json.name).toBe('report');
-    expect(json.default_member_permissions).toBe(String(PermissionFlagsBits.ManageGuild));
+    expect(json.default_member_permissions).toBeUndefined();
+    expect(command.ignoresAdminOnlyLockdown).toBe(true);
   });
 
   it('exposes the subcommands the workflow needs', () => {

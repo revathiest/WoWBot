@@ -119,6 +119,22 @@ describe('registerCommands', () => {
     expect(rest.put).toHaveBeenCalledWith(Routes.applicationGuildCommands('app-id', 'g2'), { body });
   });
 
+  it('does not stamp Manage Server onto a command that opts out of the lockdown', async () => {
+    const client = fakeClient([guild('g1', 'Alpha')]);
+    const rest = { put: jest.fn(async () => {}), get: jest.fn(async () => []) };
+    const exempt = { ...fakeCommand('report'), ignoresAdminOnlyLockdown: true };
+    const commandMap = new Map([
+      ['token', fakeCommand('token')],
+      ['report', exempt]
+    ]);
+
+    await registerCommands(client, { config: baseConfig, rest, commandMap });
+
+    expect(rest.put).toHaveBeenCalledWith(Routes.applicationGuildCommands('app-id', 'g1'), {
+      body: [...body, { name: 'report', description: 'report description' }]
+    });
+  });
+
   it('pins to one guild when GUILD_ID is set, ignoring the others', async () => {
     const rest = { put: jest.fn(async () => {}), get: jest.fn(async () => []) };
     const config = { discord: { ...baseConfig.discord, guildId: 'guild-id' } };

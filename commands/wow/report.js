@@ -2,17 +2,19 @@
 // /report — the weekly guild report: what it covers, when it posts, and a way
 // to see it on demand.
 //
-// Permission is enforced in code as well as declared on the command, for the
-// reason given in commands/admin/spam.js: the default-member-permissions flag
-// only hides a command in the UI and can be overridden per guild. It matters
-// more here than usual, since a single `/report now` is a few hundred Blizzard
-// API calls.
+// Unlike most of the other admin commands, this one declares no
+// default-member-permissions and sets `ignoresAdminOnlyLockdown` (see
+// buildDefinitions in utils/commandRegistration): it is visible to everyone in
+// Discord's command picker, and `isAdmin()` (Manage Server, or a role granted
+// via /adminrole) is the only gate, checked in code below. That is what lets a
+// guild hand this command to a role without a manual per-guild Discord
+// Integrations override. It matters more here than for most commands to get
+// right, since a single `/report now` is a few hundred Blizzard API calls.
 
 const {
   SlashCommandBuilder,
   EmbedBuilder,
   AttachmentBuilder,
-  PermissionFlagsBits,
   MessageFlags,
   ChannelType
 } = require('discord.js');
@@ -49,7 +51,6 @@ const FREQUENCY_CHOICES = [
 const data = new SlashCommandBuilder()
   .setName('report')
   .setDescription('Weekly guild reports: leaderboards, roster changes, and PvP.')
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addSubcommand(sub =>
     sub.setName('status').setDescription('Show what is tracked and when the next report posts.')
   )
@@ -543,9 +544,11 @@ async function execute(interaction) {
 module.exports = {
   data,
   help: 'Configures and previews the weekly guild report.',
-  // Manage Server gated, so it belongs with the other admin commands in /help
-  // even though it lives under commands/wow/.
+  // isAdmin()-gated in code, so it belongs with the other admin commands in
+  // /help even though it lives under commands/wow/.
   category: 'Admin',
+  // See the file header: visible to everyone, isAdmin() is the only gate.
+  ignoresAdminOnlyLockdown: true,
   buildStatusEmbed,
   describeFailure,
   describeSchedule,

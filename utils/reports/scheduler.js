@@ -17,6 +17,7 @@ const { diffSnapshots } = require('./diff');
 const { loadSnapshot, saveSnapshot } = require('./history');
 const { appendKillEntry, loadKillHistory } = require('./killHistory');
 const { buildKillTally } = require('./killTally');
+const { appendReportHistoryEntry } = require('./reportHistory');
 const { buildOwnerIndex } = require('./links');
 const { buildKillTallyComponents, buildReportEmbed, buildRosterComponents } = require('./render');
 const { fetchPresentUserIds } = require('./membership');
@@ -116,6 +117,7 @@ async function buildGuildReport(
 
   if (persist) {
     saveSnapshot(key, snapshot);
+    appendReportHistoryEntry(key, diff);
 
     appendKillEntry(key, {
       capturedAt: now,

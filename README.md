@@ -25,7 +25,7 @@ JSON files under `data/` hold settings and last week's snapshots; everything els
 | `/arena ladder \| rank` | Arena ladder standings for a bracket, or where one character ranks across 2v2, 3v3 and 5v5. |
 | `/guild <guild> [realm] [game] [region]` | Guild roster: size, faction, guild master, class and level spread, and max-level members. |
 | `/audit <character> [realm] [game] [region]` | Raid-readiness check — finds missing enchants on the slots TBC actually enchants. |
-| `/report status \| now \| post \| track \| untrack \| configure …` | The guild report: track guilds, set the channel and schedule, and preview or post on demand. Requires Manage Server. |
+| `/report status \| now \| post \| excel \| track \| untrack \| configure …` | The guild report: track guilds, set the channel and schedule, preview or post on demand, and download it (plus its history) as Excel. Requires Manage Server. |
 | `/iam add \| remove \| list \| forget` | Link your characters so reports mention you instead of just naming the character. Optional, and open to everyone. |
 | `/iam main` | Choose which of your characters you are known by. |
 | `/iam manage assign \| unassign \| main \| nicknames \| sync` | Manage other members' characters and nicknames. Requires Manage Server. |
@@ -118,6 +118,15 @@ the number from a guess into a fact.
 `/report now` builds the report and shows it to you **without posting it and without resetting the
 week** — safe to run whenever. `/report post` publishes for real and starts a new week from that
 moment.
+
+### Downloading it as Excel
+
+`/report excel` attaches an `.xlsx` file instead of posting embeds — four sheets per tracked guild:
+**Roster** (every current member, class, level, lifetime kills, and who has linked it), **Changes**
+(joins, leaves, level-ups, promotions, honorable kills this period), **Kill Tally** (today/7-day/
+lifetime per member), and **History** — one row per past report, so a guild tracked for a few months
+can be opened and charted to see membership and kill trends over time. Like `/report now`, it
+previews without resetting the week.
 
 ### The first report is a baseline
 

@@ -11,6 +11,7 @@
 const {
   SlashCommandBuilder,
   EmbedBuilder,
+  AttachmentBuilder,
   PermissionFlagsBits,
   MessageFlags,
   ChannelType
@@ -30,6 +31,9 @@ const {
 const { buildAllReports, nextSlotAt, publishReports } = require('../../utils/reports/scheduler');
 const { deleteSnapshot, loadSnapshot } = require('../../utils/reports/history');
 const { deleteKillHistory } = require('../../utils/reports/killHistory');
+const { deleteReportHistory, loadReportHistory } = require('../../utils/reports/reportHistory');
+const { buildReportWorkbookBuffer } = require('../../utils/reports/excel');
+const { buildOwnerIndex } = require('../../utils/reports/links');
 const { addRegionOption, resolveScope } = require('../../utils/commandOptions');
 const { BlizzardApiError } = require('../../utils/blizzard/client');
 const { discordTimestamp, FALLBACK_COLOR, REGION_CHOICES } = require('../../utils/wow');
@@ -57,6 +61,11 @@ const data = new SlashCommandBuilder()
     sub
       .setName('post')
       .setDescription('Post the report to its channel now, and start a new week from this moment.')
+  )
+  .addSubcommand(sub =>
+    sub
+      .setName('excel')
+      .setDescription('Download this week\'s report, plus each guild\'s history, as an Excel file.')
   )
   .addSubcommand(sub => {
     sub
@@ -280,6 +289,54 @@ async function preview(interaction) {
   });
 }
 
+/**
+ * Builds this week's report the same way `/report now` does, without touching
+ * the baseline, and attaches it as an .xlsx instead of posting embeds — a
+ * roster and a history log are both things somebody wants to sort, filter, or
+ * keep around, which a Discord embed cannot do.
+ */
+async function sendExcel(interaction) {
+  const config = loadConfig();
+
+  if (config.guilds.length === 0) {
+    await interaction.editReply('❌ No guilds are tracked yet. Add one with `/report track guild:<name>`.');
+    return;
+  }
+
+  const { reports, failures } = await buildAllReports({ persist: false, config });
+
+  if (reports.length === 0) {
+    await interaction.editReply({
+      content: '❌ No report could be built.',
+      embeds: failures.length > 0 ? [failureEmbed(failures)] : []
+    });
+    return;
+  }
+
+  const histories = new Map(reports.map(report => [report.key, loadReportHistory(report.key)]));
+
+  const resolveTag = userId => interaction.client.users.cache.get(userId)?.tag ?? null;
+
+  const buffer = await buildReportWorkbookBuffer(reports, {
+    owners: buildOwnerIndex(),
+    resolveTag,
+    histories
+  });
+
+  const attachment = new AttachmentBuilder(Buffer.from(buffer), {
+    name: `guild-report-${new Date().toISOString().slice(0, 10)}.xlsx`
+  });
+
+  const lines = [`📊 ${reports.length} guild(s), as an Excel file.`];
+  if (failures.length > 0) lines.push(`⚠️ ${failures.length} guild(s) failed — see below.`);
+
+  await interaction.editReply({
+    content: lines.join(' '),
+    files: [attachment],
+    embeds: failures.length > 0 ? [failureEmbed(failures)] : []
+  });
+}
+
 async function postNow(interaction) {
   const config = loadConfig();
 
@@ -366,6 +423,7 @@ function untrack(interaction) {
   removedGuilds.forEach(guild => {
     deleteSnapshot(guildKey(guild));
     deleteKillHistory(guildKey(guild));
+    deleteReportHistory(guildKey(guild));
   });
 
   return `✅ No longer reporting on **${name}**, and its stored history was discarded.`;
@@ -470,6 +528,11 @@ async function execute(interaction) {
 
   if (subcommand === 'post') {
     await postNow(interaction);
+    return;
+  }
+
+  if (subcommand === 'excel') {
+    await sendExcel(interaction);
     return;
   }
 

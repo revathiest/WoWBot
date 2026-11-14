@@ -23,7 +23,8 @@
   },
   "dependencies": {
     "discord.js": "^14.26.4",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0"
   },
   "devDependencies": {
     "jest": "^30.4.2"
